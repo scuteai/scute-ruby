@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Authentication: `scute.tokens.verify` checks your users' access tokens locally (RS256 with the app's JWKS, cached, re-read on key rotation at most once a minute, expiry with 30s leeway, the token must be this app's, user sessions only). `remote: true` also asks Scute that the session is live.
+- `Scute::Authentication` for controllers: `scute_authenticate!`, `scute_session`, `scute_user_id`, `scute_signed_in?`; reads X-Authorization, a bearer header or the browser SDK's cookie. With `Scute::Authorization`, checks run as the signed-in user and carry the impersonation context.
+- `scute.users`: list, get, find by identifier, create, invite, update, activate, deactivate, delete; impersonate, impersonations, stop_impersonating.
+- `scute.sessions`: current_user, refresh, sign_out (with the user's tokens); list and revoke (secret key).
+
 ## 0.1.0
 
 - `Scute::Client`: authorization checks (single and batch), permissions, authorized users, data filters, step-up challenges, the signed policy snapshot, access requests, and agent management (register, suspend, tasks, delegation assertions).

@@ -6,8 +6,9 @@ Gem::Specification.new do |spec|
   spec.name = "scute"
   spec.version = Scute::VERSION
   spec.authors = ["Scute"]
-  spec.summary = "Scute for Ruby: authorization for your app's users and guardrails for the agents you build."
-  spec.description = "Permission checks, data filters and access requests against Scute's engine, " \
+  spec.summary = "Scute for Ruby: sign-in verification, users, authorization and guardrails for the agents you build."
+  spec.description = "Access token verification, user and session management, " \
+                     "permission checks, data filters and access requests against Scute's engine, " \
                      "plus a harness of guards (permissions, verification, approvals, grounding, budgets, content) around your agents."
   spec.homepage = "https://github.com/scuteai/scute-ruby"
   spec.license = "MIT"

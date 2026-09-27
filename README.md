@@ -1,7 +1,8 @@
 # scute (Ruby)
 
-Scute for Ruby: authorization checks for your app's users, and a harness of
-guards around the agents you build.
+Scute for Ruby: sign-in verification and user management, authorization
+checks for your app's users, and a harness of guards around the agents you
+build.
 
 ```ruby
 gem "scute"
@@ -9,6 +10,77 @@ gem "scute"
 
 Set `SCUTE_APP_ID` and `SCUTE_SECRET` (server side only). Ruby 3.2+, no
 runtime dependencies.
+
+## Authentication
+
+Your frontend signs people in with a Scute SDK; your Ruby backend verifies
+the access token it sends. Verification is local (RS256, the app's published
+keys, cached and re-read on rotation) and checks the expiry and that the token
+is this app's.
+
+```ruby
+scute = Scute::Client.new
+
+session = scute.tokens.verify(token)   # raises Scute::InvalidToken (e.reason: :expired, :signature, ...)
+session.user_id                        # the Scute app user id
+session.impersonated?                  # someone (support) is signed in as this user
+session.actor                          # who: { "kind" => "backend", "email" => "support@acme.com" }
+
+scute.tokens.verify(token, remote: true) # also asks Scute, so a session revoked a moment ago fails
+```
+
+In a controller:
+
+```ruby
+class ApplicationController < ActionController::Base
+  include Scute::Authentication
+  include Scute::Authorization
+  before_action :scute_authenticate!
+  rescue_from Scute::Unauthenticated, with: -> { head :unauthorized }
+end
+
+# scute_session, scute_user_id, scute_signed_in?
+# scute_authorize! now checks as the signed-in user, and tells Scute when
+# someone is signed in as them (permissions marked "not while
+# impersonating" are refused).
+```
+
+The token is read from `X-Authorization`, `Authorization: Bearer`, or the
+cookie the browser SDK sets; override `scute_access_token` to read it
+elsewhere.
+
+### Users and sessions (secret key)
+
+```ruby
+scute.users.create("ada@example.com", meta: { plan: "pro" })
+scute.users.invite("bob@example.com")
+scute.users.find_by_identifier("ada@example.com")
+scute.users.list(page: 1)
+scute.users.update(id, user_meta: { plan: "team" })
+scute.users.deactivate(id) / activate(id) / delete(id)
+
+scute.sessions.list(user_id)
+scute.sessions.revoke(user_id, session_id)
+scute.sessions.current_user(access_token)
+scute.sessions.refresh(refresh_token)
+scute.sessions.sign_out(access_token)
+```
+
+### Signing in as a user (support access)
+
+Off until the app turns it on. The session is short and never refreshed;
+its token names who is really acting.
+
+```ruby
+tokens = scute.users.impersonate(user_id, reason: "Ticket 4411", actor: { email: "support@acme.com" }, minutes: 15)
+# or actor_user_id: an app user who holds user:impersonate
+scute.users.impersonations(user_id)
+scute.users.stop_impersonating(user_id)
+```
+
+Hand `tokens` to the browser (`scute.beginImpersonation(tokens)` in
+@scute/js-core); `stopImpersonating()` there brings the support person's own
+session back.
 
 ## Authorization
 

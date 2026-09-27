@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
+require "base64"
 require "json"
+require "openssl"
 require "time"
 
 # A small stand-in for the Scute API endpoints the SDK calls, as a transport.
 class FakeScute
-  Seen = Data.define(:verb, :path, :body, :auth)
+  Seen = Data.define(:verb, :path, :body, :auth, :headers, :query)
 
   attr_reader :seen
-  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status
+  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status, :signing_keys, :revoked
 
   def initialize(decide: nil, ceiling: %w[invoice:read invoice:refund], request_status: "pending", ttl: 1800)
     @decide = decide
@@ -18,6 +20,8 @@ class FakeScute
     @seen = []
     @tasks = 0
     @verification_status = "pending"
+    @signing_keys = []
+    @revoked = []
   end
 
   def paths(path) = seen.select { |s| s.path == path }
@@ -29,19 +33,57 @@ class FakeScute
     query = URI(url).query
     parsed = body ? JSON.parse(body) : nil
     auth = headers["Authorization"]
-    seen << Seen.new(verb: method, path: path, body: parsed, auth: auth)
-    route(method, path, query, parsed, auth)
+    seen << Seen.new(verb: method, path: path, body: parsed, auth: auth, headers: headers, query: query)
+    route(method, path, query, parsed, auth, headers)
   end
 
   private
 
   def json(data, status = 200) = [status, JSON.generate(data)]
 
-  def route(method, path, query, body, auth)
+  def jwk(key, kid)
+    { kty: "RSA", kid: kid, use: "sig", alg: "RS256",
+      n: Base64.urlsafe_encode64(key.n.to_s(2), padding: false), e: Base64.urlsafe_encode64(key.e.to_s(2), padding: false) }
+  end
+
+  def route(method, path, query, body, auth, headers = {})
     secret = auth == "Bearer sk_test"
     task = auth.to_s.start_with?("Bearer sct_")
+    session = headers["X-Authorization"]
 
     case [method, path]
+    in [:get, "/v1/auth/app1/.well-known/jwks.json" | "/v1/auth/7f1c0000-0000-4000-8000-000000000001/.well-known/jwks.json"]
+      json({ keys: signing_keys.map { |key, kid| jwk(key, kid) } })
+    in [:get, "/v1/apps/7f1c0000-0000-4000-8000-000000000001" | "/v1/apps/app1"]
+      json({ id: "app1", name: "Test" })
+    in [:get, "/v1/auth/app1/current_user"]
+      return json({ error: "Not authorized" }, 401) if session.nil? || revoked.include?(session)
+
+      json({ user: { id: "user1" } })
+    in [:delete, "/v1/auth/app1/current_user"]
+      json({ message: "ok" })
+    in [:post, "/v1/auth/app1/tokens/refresh"]
+      json({ access: "new.access", refresh: "new.refresh", seen_refresh: headers["X-Refresh-Token"] })
+    in [:get, "/v1/app1/users"]
+      json({ users: [{ id: "user1" }], query: query })
+    in [:get, "/v1/auth/app1/users"]
+      json({ user: query.to_s.include?("ada") ? { id: "user1" } : nil })
+    in [:post, "/v1/auth/app1/users"]
+      json({ user: { id: "user2", identifier: body["identifier"] } }, 201)
+    in [:post, %r{\A/v1/app1/users/[^/]+/(activate|deactivate)\z}] | [:patch, %r{\A/v1/app1/users/}] | [:delete, %r{\A/v1/app1/users/}]
+      return json({ error: "Unauthorized" }, 401) unless secret
+
+      json({ ok: true })
+    in [:post, "/v1/apps/app1/users/user1/impersonate"]
+      return json({ error: "Unauthorized" }, 401) unless secret
+
+      json({ access: "imp.access", session_id: "ses1", impersonation: { reason: body["reason"] } }, 201)
+    in [:get, "/v1/apps/app1/users/user1/impersonations"]
+      json({ impersonations: [{ session_id: "ses1" }] })
+    in [:delete, "/v1/apps/app1/users/user1/impersonate"]
+      json({ ended: 1 })
+    in [:get, "/v1/app1/users/user1/sessions"]
+      json([{ id: "ses1" }])
     in [:post, "/v1/apps/app1/authz/agents/support-bot/tasks"]
       return json({ error: "Unauthorized" }, 401) unless secret
 
