@@ -40,8 +40,9 @@ module Scute
       data = parse(raw)
       return data if status.between?(200, 299)
 
-      message = data.is_a?(Hash) && data["error"] ? data["error"] : "Scute answered #{status}"
-      raise APIError.new(message, status: status, code: data.is_a?(Hash) ? data["error_code"] : nil)
+      hash = data.is_a?(Hash) ? data : {}
+      message = hash["error"] || hash["say"] || "Scute answered #{status}"
+      raise APIError.new(message, status: status, code: hash["error_code"], body: data)
     end
 
     private

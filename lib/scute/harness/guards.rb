@@ -45,7 +45,12 @@ module Scute
 
         request = call.run.request_approval(call)
         engine = call.run.engine_check(call, context) if request && request["status"] == "approved"
-        from_engine(engine).tap { |d| d.approve[:request_id] = request["id"] if d.approve && request }
+        from_engine(engine).tap do |d|
+          next unless d.approve && request
+
+          d.approve[:request_id] = request["id"]
+          d.say = request["say"]
+        end
       end
 
       private
@@ -55,11 +60,12 @@ module Scute
         when "allow" then Harness::Decision.new(kind: :proceed, reason: engine.reason, engine: engine)
         when "allow_with_step_up"
           step_up = engine.step_up || {}
-          Harness::Decision.new(kind: :verify, reason: engine.reason, message: engine.explanation, engine: engine,
+          Harness::Decision.new(kind: :verify, reason: engine.reason, message: engine.explanation, say: engine.say, engine: engine,
                                 verify: { method: step_up["method"], permission: step_up["authorizes_action"] || engine.permission }.compact)
         when "allow_with_approval"
-          Harness::Decision.new(kind: :approve, reason: engine.reason, message: engine.explanation, engine: engine, approve: { by: :reviewer })
-        else Harness::Decision.new(kind: :deny, reason: engine.reason, message: engine.explanation, engine: engine)
+          Harness::Decision.new(kind: :approve, reason: engine.reason, message: engine.explanation, say: engine.say, engine: engine,
+                                approve: { by: :reviewer })
+        else Harness::Decision.new(kind: :deny, reason: engine.reason, message: engine.explanation, say: engine.say, engine: engine)
         end
       end
     end

@@ -65,26 +65,44 @@ RSpec.describe Scute::Harness do
       expect(v.results.first.error).to be_a(Scute::ConnectionError)
     end
 
-    it "verifies the person and carries the proof into the next check" do
+    it "verifies the person with the task token and carries the proof into the next check" do
       fake = FakeScute.new(decide: lambda { |body, _|
-        body["challenge"] == "ch_ok" ? nil : { decision: "allow_with_step_up", step_up: { method: "any", authorizes_action: "invoice:pay" } }
+        next nil if body["challenge"] == "ch_ok"
+
+        { decision: "allow_with_step_up", say: "Before I do that, I need to verify it's you.",
+          step_up: { method: "any", authorizes_action: "invoice:pay" } }
       })
-      run = harness(fake).run(acts_for: "user1")
+      h = Scute::Harness.new(agent: "support-bot", app_id: "app1", secret: nil, base_url: "https://scute.test", transport: fake)
+      run = h.run(token: "sct_from_backend")
 
       first = run.check("pay_invoice", { id: 1 })
-      expect(first.kind).to eq(:verify)
+      expect([first.kind, first.say]).to eq([:verify, "Before I do that, I need to verify it's you."])
       expect { run.start_verification(verdict: first) }.to raise_error(ArgumentError, /verification method/)
 
-      expect(run.start_verification(verdict: first, method: "email_otp")["token"]).to eq("ch_ok")
-      expect(fake.paths("/v1/auth/app1/challenges").first.body)
-        .to eq("purpose" => "step_up", "method" => "email_otp", "app_user_id" => "user1", "metadata" => { "authorizes_action" => "invoice:pay" })
+      expect(run.start_verification(method: "email_otp")["say"]).to eq("I've emailed a code to a***@example.com. What's the code?")
+      started = fake.paths("/v1/auth/app1/agent/verifications").first
+      expect([started.auth,
+              started.body]).to eq(["Bearer sct_from_backend", { "method" => "email_otp", "permission" => "invoice:pay", "session_id" => "sess1" }])
 
-      run.complete_verification
-      expect(fake.paths("/v1/auth/app1/agent/sessions/sess1/verified").first.body).to eq("challenge" => "ch_ok")
+      expect(run.submit_code("000000")).to include("status" => "pending", "remaining_attempts" => 2,
+                                                   "say" => "That code didn't work. Want to try again?")
+      expect(run.verified_at).to be_nil
+      expect(run.submit_code("123456")["status"]).to eq("completed")
       expect(run.verified_at).to be > 0
 
       expect(run.check("pay_invoice", { id: 1 }).kind).to eq(:proceed)
       expect(fake.paths(check_path).last.body).to include("challenge" => "ch_ok", "session_id" => "sess1")
+    end
+
+    it "records a push once it's approved" do
+      fake = FakeScute.new
+      run = harness(fake).run(acts_for: "user1")
+      run.start_verification(method: "entra_push", permission: "invoice:pay")
+
+      expect { run.complete_verification }.to raise_error(Scute::APIError, /Not verified yet \(pending\)/)
+      fake.verification_status = "completed"
+      run.complete_verification
+      expect(run.snapshot["challenges"]).to eq("invoice:pay" => "ch_ok")
     end
 
     it "rejects a verification Scute doesn't accept" do
@@ -104,10 +122,12 @@ RSpec.describe Scute::Harness do
       pending = run.check("refund_invoice", { invoice_id: 42, amount: 900 })
       expect(pending.kind).to eq(:approve)
       expect(pending.decision.approve).to eq(by: :reviewer, request_id: "req1")
-      expect(pending.message).to match(/The request is filed/)
-      expect(fake.paths("/v1/apps/app1/authz/requests").first.body)
-        .to include("user_id" => "user1", "action" => "refund", "resource" => "invoice:42",
-                    "reason" => "support-bot asked: refund_invoice (invoice_id 42, amount 900)")
+      expect(pending.message).to match(/The request is filed \(id req1\)/)
+      expect(pending.say).to eq("I've asked for approval. I'll let you know when there's an answer.")
+      expect(fake.paths("/v1/auth/app1/agent/approvals").first.body)
+        .to include("action" => "refund", "resource" => { "type" => "invoice", "key" => "42", "attributes" => { "amount" => 900 } },
+                    "reason" => "refund_invoice (invoice_id 42, amount 900)")
+      expect(run.approval_status("req1")["say"]).to eq("Still waiting.")
 
       fake.request_status = "approved"
       expect(run.check("refund_invoice", { invoice_id: 42, amount: 900 }).kind).to eq(:proceed)
@@ -124,7 +144,7 @@ RSpec.describe Scute::Harness do
 
       unfiled = harness(fake, guards: [Scute::Guards.permissions(file_requests: false)]).run(acts_for: "user1").check("refund_invoice", { id: 1 })
       expect(unfiled.message).to eq("Needs a reviewer. Tell the person it needs a reviewer's approval.")
-      expect(fake.paths("/v1/apps/app1/authz/requests")).to be_empty
+      expect(fake.paths("/v1/auth/app1/agent/approvals")).to be_empty
     end
   end
 

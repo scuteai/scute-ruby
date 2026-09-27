@@ -29,6 +29,22 @@ module Scute
           instance
         end
 
+        # RubyLLM::Tool subclasses for the human steps (needs the ruby_llm gem loaded).
+        def human_tools(run, methods: HumanTools::METHODS)
+          raise Scute::ConfigurationError, "ruby_llm isn't loaded" unless defined?(::RubyLLM::Tool)
+
+          HumanTools.build(run, methods: methods).map do |name, spec|
+            Class.new(::RubyLLM::Tool) do
+              description spec[:description]
+              spec[:parameters].each do |param_name, p|
+                param param_name, type: p[:type], desc: p[:desc], required: p.fetch(:required, false)
+              end
+              define_method(:name) { name }
+              define_method(:execute) { |**args| spec[:call].call(args) }
+            end.new
+          end
+        end
+
         def tool_name(instance)
           return instance.name.to_s if instance.respond_to?(:name) && instance.name
 

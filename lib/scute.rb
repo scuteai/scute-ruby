@@ -12,8 +12,10 @@ require_relative "scute/harness/decision"
 require_relative "scute/harness/convention"
 require_relative "scute/harness/call"
 require_relative "scute/harness/store"
+require_relative "scute/harness/human_steps"
 require_relative "scute/harness/run"
 require_relative "scute/harness/guards"
+require_relative "scute/harness/human_tools"
 require_relative "scute/harness/adapters/ruby_llm"
 
 # Scute for Ruby: authorization checks for your app's users, and a harness

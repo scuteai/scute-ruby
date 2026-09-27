@@ -4,13 +4,14 @@ module Scute
   module Authz
     # An answer from Scute's engine. `allowed?` is true only for a plain
     # allow: a step-up or approval answer isn't allowed yet.
+    # `say`: a line for the person (agent checks), when the answer isn't a plain allow.
     Decision = Data.define(:decision, :reason, :permission, :roles, :path, :conditions,
-                           :step_up, :approval, :agent, :explanation) do
+                           :step_up, :approval, :agent, :explanation, :say) do
       def self.from_api(hash)
         h = hash || {}
         new(decision: h["decision"], reason: h["reason"], permission: h["permission"], roles: h["roles"] || [],
             path: h["path"], conditions: h["conditions"], step_up: h["step_up"], approval: h["approval"],
-            agent: h["agent"], explanation: h["explanation"])
+            agent: h["agent"], explanation: h["explanation"], say: h["say"])
       end
 
       def allowed? = decision == "allow"

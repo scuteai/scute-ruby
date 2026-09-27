@@ -8,7 +8,7 @@ class FakeScute
   Seen = Data.define(:verb, :path, :body, :auth)
 
   attr_reader :seen
-  attr_accessor :request_status, :ttl, :ceiling, :decide, :down
+  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status
 
   def initialize(decide: nil, ceiling: %w[invoice:read invoice:refund], request_status: "pending", ttl: 1800)
     @decide = decide
@@ -17,6 +17,7 @@ class FakeScute
     @ttl = ttl
     @seen = []
     @tasks = 0
+    @verification_status = "pending"
   end
 
   def paths(path) = seen.select { |s| s.path == path }
@@ -69,6 +70,26 @@ class FakeScute
       json({ error: "That challenge doesn't verify this person", error_code: "challenge_invalid" }, 422)
     in [:post, "/v1/auth/app1/agent/sessions/sess1/end"]
       json({ id: "sess1" })
+    in [:post, "/v1/auth/app1/agent/verifications"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json({ token: "ch_ok", status: "pending", method: body["method"], say: "I've emailed a code to a***@example.com. What's the code?" }, 201)
+    in [:get, "/v1/auth/app1/agent/verifications/ch_ok"]
+      json({ token: "ch_ok", status: verification_status,
+             say: verification_status == "completed" ? "Thanks, you're verified." : "Approve it, then tell me." })
+    in [:post, "/v1/auth/app1/agent/verifications/ch_ok/code"]
+      if body["code"] == "123456"
+        self.verification_status = "completed"
+        return json({ token: "ch_ok", status: "completed", say: "Thanks, you're verified." })
+      end
+
+      json({ token: "ch_ok", status: "pending", remaining_attempts: 2, error: "Invalid code", say: "That code didn't work. Want to try again?" }, 422)
+    in [:post, "/v1/auth/app1/agent/approvals"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json({ id: "req1", status: request_status, say: "I've asked for approval. I'll let you know when there's an answer." }, 201)
+    in [:get, "/v1/auth/app1/agent/approvals/req1"]
+      json({ id: "req1", status: request_status, say: request_status == "approved" ? "It's approved." : "Still waiting." })
     in [:post, "/v1/auth/app1/challenges"]
       return json({ error: "Unauthorized" }, 401) unless secret
 

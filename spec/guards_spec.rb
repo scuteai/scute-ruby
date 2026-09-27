@@ -144,7 +144,7 @@ RSpec.describe Scute::Guards do
       expect([v.kind, v.decision.verify[:methods]]).to eq([:verify, ["entra_push"]])
 
       run.start_verification(verdict: v)
-      run.complete_verification
+      expect(run.submit_code("123456")["status"]).to eq("completed")
       expect(run.check("reset_mfa").kind).to eq(:proceed)
     end
 

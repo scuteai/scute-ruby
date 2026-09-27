@@ -14,7 +14,12 @@ module Scute
       HOUR = 3600
       # Tool names seen through adapters; allowed_tools narrows these.
       attr_accessor :tool_names
+      # @api private: the last verification a guard asked for (for the verify_person tool),
+      # and the human tool names, always offered to the model.
+      attr_accessor :last_verify, :human_tool_names
       attr_reader :harness, :id
+
+      include HumanSteps
 
       # acts_for: the app user the agent works for (omit for an agent on its own).
       # task: { actions:, resources:, ttl:, ref: } narrows the task.
@@ -35,6 +40,7 @@ module Scute
         @grounded = Set.new
         @identified = Set.new
         @tool_names = []
+        @human_tool_names = []
       end
 
       # ── Task ──
@@ -88,40 +94,6 @@ module Scute
         end
       end
 
-      # Send the person a verification (push, passkey, OTP). Needs the secret key.
-      def start_verification(verdict: nil, method: nil, permission: nil)
-        user_id = acts_for_id or raise APIError.new("This run acts for nobody, so there's no one to verify", status: 409, code: "needs_human")
-        asked = verdict&.decision&.verify || {}
-        permission ||= asked[:permission]
-        methods = [method, asked[:method], *Array(asked[:methods])].compact.map(&:to_s).reject { |m| m.empty? || m == "any" }
-        raise ArgumentError, "Pick a verification method (e.g. entra_push, email_otp, sms_otp)" if methods.empty?
-
-        challenge = harness.client.request(:post, harness.client.auth_path("/challenges"), body: {
-                                             purpose: "step_up", method: methods.first, app_user_id: user_id,
-                                             metadata: permission ? { authorizes_action: permission } : {}
-                                           })["challenge"]
-        @lock.synchronize do
-          state["pending"] = { "token" => challenge["token"], "permission" => permission }
-          save
-        end
-        challenge
-      end
-
-      # The person finished it. Scute checks it's theirs, completed and fresh.
-      def complete_verification(challenge_token = nil)
-        pending = state["pending"] || {}
-        challenge_token ||= pending["token"]
-        raise ArgumentError, "No verification to complete" unless challenge_token
-
-        agent_call(:post, "/agent/sessions/#{harness.client.esc(session)}/verified", body: { challenge: challenge_token })
-        @lock.synchronize do
-          state["verified_at"] = Time.now.to_f
-          state["challenges"][pending["permission"]] = challenge_token if pending["token"] == challenge_token && pending["permission"]
-          state.delete("pending")
-          save
-        end
-      end
-
       def verified_at = state["verified_at"]
 
       # The person confirmed this exact call in your UI; guards.approval lets it through once.
@@ -162,23 +134,6 @@ module Scute
           end
         end
         decision
-      end
-
-      # @api private: file (or find: Scute returns the open one) the access request for this call.
-      def request_approval(call)
-        return nil unless harness.client.secret? && call.permission
-
-        user_id = acts_for_id or return nil
-        ref = Harness.resource_ref(call.resource)
-        request = harness.client.authz.create_request(
-          user_id, action: call.spec.action, resource: ref.empty? ? nil : ref,
-                   reason: "#{harness.agent} asked: #{Messages.describe_call(call.tool, call.args)}"
-        )
-        @lock.synchronize do
-          state["approvals"][approval_key(call)] = request["id"]
-          save
-        end
-        request
       end
 
       # ── Checking calls ──
@@ -250,10 +205,11 @@ module Scute
       # Tools the task could ever use (its ceiling). Tools without a permission always count.
       def allowed_tools(names = tool_names)
         ceiling = Array(whoami["ceiling"])
-        names.select do |n|
+        allowed = names.select do |n|
           permission = harness.spec(n).permission
-          permission.nil? || ceiling.include?(permission)
+          human_tool_names.include?(n) || permission.nil? || ceiling.include?(permission)
         end
+        (allowed + human_tool_names).uniq
       end
 
       # A copy of what this run remembers.
@@ -263,6 +219,12 @@ module Scute
 
       # RubyLLM: guard a tool (class or instance). Pass chat: so grounding sees the conversation.
       def ruby_llm(tool, chat: nil) = Adapters::RubyLLM.wrap(self, tool, chat: chat)
+
+      # RubyLLM tools the model calls to bring the person in (verify, pass on a code, whoami...).
+      def ruby_llm_human_tools(methods: HumanTools::METHODS) = Adapters::RubyLLM.human_tools(self, methods: methods)
+
+      # The same human steps as plain callables: { name => { description:, parameters:, call: ->(args) } }.
+      def human_tools(methods: HumanTools::METHODS) = HumanTools.build(self, methods: methods)
 
       private
 
@@ -329,10 +291,6 @@ module Scute
           s["closed"] = true
           save
         end
-      end
-
-      def acts_for_id
-        @acts_for || state["acts_for"] || whoami["acts_for"]
       end
 
       def agent_call(method, path, body: nil, idempotent: method == :get)

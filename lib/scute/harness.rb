@@ -60,10 +60,8 @@ module Scute
         break if decision.kind == :deny
       end
 
-      verdict = Verdict.new(kind: winner.kind, decision: winner, args: call.args, results: results, call_id: call.id, tool: call.tool)
-      verdict.message = Messages.for_model(verdict.kind, winner) unless verdict.runs?
       emit(call, :before, winner, results, started)
-      verdict
+      verdict_for(call, winner, results)
     end
 
     # @api private: after-guards transform or withhold a result.
@@ -114,6 +112,14 @@ module Scute
     end
 
     private
+
+    def verdict_for(call, winner, results)
+      verdict = Verdict.new(kind: winner.kind, decision: winner, args: call.args, results: results, call_id: call.id,
+                            tool: call.tool, say: winner.say || winner.engine&.say)
+      verdict.message = Messages.for_model(verdict.kind, winner, human_tools: call.run.human_tool_names.any?) unless verdict.runs?
+      call.run.last_verify = winner.verify if verdict.kind == :verify
+      verdict
+    end
 
     def ask(guard, phase, *)
       decision = guard.public_send(phase, *)

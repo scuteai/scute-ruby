@@ -88,10 +88,19 @@ the invoice named by `invoice_id` (or `invoiceId`, or `id`), with plain
 arguments as attributes for policy conditions. Override per tool with
 `tools: { send_money: { permission: "payment:create", key: :to }, get_weather: false }`.
 
-People in the loop: `run.start_verification(verdict:)` and
-`run.complete_verification` (Scute confirms the challenge is theirs),
-`run.confirm(tool, args)` when the person confirmed a call in your UI, and
-reviewer approvals filed as Scute access requests.
+People in the loop, all with the task token:
+
+- Verify: `run.start_verification(method: "email_otp")` sends a code (or
+  `sms_otp`, `totp`, `entra_push`), `run.submit_code(code)` passes on what the
+  person read out, `run.verification_status` checks a push.
+- Let the model do it: `chat.with_tools(*run.ruby_llm_human_tools)` gives it
+  `scute_verify_person`, `scute_submit_code`, `scute_check_verification`,
+  `scute_approval_status` and `scute_whoami` (`run.human_tools` returns plain
+  callables for other frameworks). Every answer has a `say` line the agent
+  can speak as is.
+- Confirm: `run.confirm(tool, args)` when the person confirmed a call in your UI.
+- Reviewer approval: filed as a Scute access request for the exact
+  operation; `verdict.say` tells the person, `run.approval_status(id)` checks.
 
 Your own guard:
 
