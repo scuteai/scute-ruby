@@ -28,13 +28,15 @@ module Scute
     end
 
     # idempotent: retry once on a network error (reads and checks, never a mint).
-    def request(method, path, bearer:, body: nil, idempotent: method == :get)
-      raise ConfigurationError, "No credentials for this Scute call" if bearer.to_s.empty?
+    # bearer: the secret key or a task token. Calls made with a user's own
+    # session pass it in headers (X-Authorization / X-Refresh-Token) instead;
+    # public reads (the signing keys) pass public: true.
+    def request(method, path, bearer: nil, headers: {}, public: false, body: nil, idempotent: method == :get)
+      raise ConfigurationError, "No credentials for this Scute call" if bearer.to_s.empty? && headers.empty? && !public
 
       headers = {
-        "Authorization" => "Bearer #{bearer}", "Accept" => "application/json",
-        "Content-Type" => "application/json", "User-Agent" => "scute-ruby/#{VERSION}"
-      }
+        "Accept" => "application/json", "Content-Type" => "application/json", "User-Agent" => "scute-ruby/#{VERSION}"
+      }.merge(bearer.to_s.empty? ? {} : { "Authorization" => "Bearer #{bearer}" }).merge(headers)
       payload = body.nil? ? nil : JSON.generate(body)
       status, raw = send_with_retries(method, "#{@base_url}#{path}", headers, payload, idempotent)
       data = parse(raw)

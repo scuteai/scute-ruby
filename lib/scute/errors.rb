@@ -21,4 +21,16 @@ module Scute
 
   # Something is missing to make the call (app id, secret key, a task token).
   class ConfigurationError < Error; end
+
+  # An access token that isn't a live session of this app. `reason`:
+  # :missing, :malformed, :algorithm, :signature, :expired, :wrong_app,
+  # :not_a_user, :revoked.
+  class InvalidToken < Error
+    attr_reader :reason
+
+    def initialize(message, reason)
+      super(message)
+      @reason = reason
+    end
+  end
 end
