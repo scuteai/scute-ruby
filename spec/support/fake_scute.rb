@@ -94,6 +94,16 @@ class FakeScute
       json({ status: "done" })
     in [:get, "/v1/apps/app1/authz/agents/support-bot/tasks"]
       json({ tasks: [{ id: "task1", query: query }] })
+    in [:get, "/v1/auth/app1/agent/properties/stripe"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json({ name: "stripe", value: "sk_live_123" })
+    in [:get, "/v1/auth/app1/agent/properties/locked"]
+      json({ error: "support-bot isn't allowed to use locked.", error_code: "agent_not_listed" }, 403)
+    in [:post, "/v1/auth/app1/agent/properties/mandates/sign"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json(body["claims"] ? { jws: "h.b.s", alg: "ES256", kid: "prop_1" } : { signature: "c2ln", alg: "ES256", kid: "prop_1" })
     in [:get, "/v1/auth/app1/agent/whoami"]
       return json({ error: "Task token missing" }, 401) unless task
 
