@@ -59,18 +59,20 @@ module Scute
         end
       end
 
-      # @api private: file (or find: Scute returns the open one) the approval for this call.
+      # @api private: file (or find: Scute returns the open one) the approval for this
+      # exact call. Its arguments go with it and reviewers see them; the approval
+      # only counts for the same arguments.
       def request_approval(call)
         return nil unless call.permission && call.spec.action
 
         approval = agent_call(:post, "/agent/approvals", body: {
           action: call.spec.action, resource: call.resource, context: @context,
-          reason: Messages.describe_call(call.tool, call.args)
+          reason: Messages.describe_call(call.tool, call.args), details: call.args
         }.compact)
         return nil unless approval["id"]
 
         @lock.synchronize do
-          state["approvals"][approval_key(call)] = approval["id"]
+          state["approvals"][approval_key(call)] = { "id" => approval["id"], "call" => fingerprint(call.tool, call.args) }
           save
         end
         approval

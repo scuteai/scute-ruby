@@ -6,7 +6,8 @@ module Scute
     class Call
       attr_reader :run, :id, :tool, :spec, :messages
       # args: symbol keys, after any earlier guard's transform. mode: of the guard looking at it now.
-      attr_accessor :args, :mode
+      # clear: no enforced guard so far stops the call (the moment to spend single-use proofs).
+      attr_accessor :args, :mode, :clear
 
       def initialize(run:, id:, tool:, args:, spec:, messages: [], approved_by_user: false)
         @run = run
@@ -17,6 +18,7 @@ module Scute
         @messages = messages || []
         @approved_by_user = approved_by_user
         @mode = :enforce
+        @clear = true
       end
 
       # The person confirmed this exact call.

@@ -9,12 +9,16 @@ module Scute
       # refund_invoice -> "invoice:refund", resetUserMfa -> "user_mfa:reset", search -> "search"
       def self.permission_for(name)
         words = name.to_s.gsub(/([a-z0-9])([A-Z])/, '\1_\2').downcase.split(/[^a-z0-9]+/).reject(&:empty?)
-        return words.join("_") if words.size < 2
+        # A name with no letters or digits is still checked (and denied as unknown), never skipped.
+        return name.to_s.empty? ? "unnamed_tool" : name.to_s if words.empty?
+        return words.first if words.size < 2
 
         "#{words[1..].join('_')}:#{words.first}"
       end
 
       # config: { permission: "x:y" | false, tier:, key:, attributes: ->(args) {}, resource: ->(args) {} } or false
+      # Arguments reach the engine as context.args; the object's attributes only come
+      # from an explicit attributes: mapping (and Scute's stored ones win).
       def initialize(name, config, default_tier)
         config = { permission: false } if config == false
         config ||= {}
@@ -33,7 +37,7 @@ module Scute
         key_arg = @config[:key]&.to_sym || key_candidates.find { |k| key?(args[k]) }
         resource = { type: resource_type }
         resource[:key] = args[key_arg].to_s if key_arg && key?(args[key_arg])
-        attributes = @config[:attributes] ? @config[:attributes].call(args) : plain(args, key_arg)
+        attributes = @config[:attributes]&.call(args)
         resource[:attributes] = attributes if attributes && !attributes.empty?
         resource
       end
@@ -46,15 +50,6 @@ module Scute
       end
 
       def key?(value) = (value.is_a?(String) && !value.empty?) || (value.is_a?(Numeric) && value.finite?)
-
-      def plain(args, skip)
-        args.each_with_object({}) do |(k, v), out|
-          next if k == skip
-          next unless v.is_a?(String) || v == true || v == false || (v.is_a?(Numeric) && v.finite?)
-
-          out[k] = v
-        end
-      end
     end
 
     # "invoice:42", or "invoice" without a key.

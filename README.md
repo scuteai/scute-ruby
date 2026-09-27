@@ -84,9 +84,16 @@ raises counts as deny. Each guard runs in `:enforce`, `:monitor` (alerts via
 `on_alert`, never blocks) or `:observe` mode; `on_decision` sees everything.
 
 Tool names map to permissions: `refund_invoice` needs `invoice:refund` on
-the invoice named by `invoice_id` (or `invoiceId`, or `id`), with plain
-arguments as attributes for policy conditions. Override per tool with
+the invoice named by `invoice_id` (or `invoiceId`, or `id`). The call's
+arguments reach the engine as `context.args` (`context.args.amount < 500`);
+the object's attributes come from what Scute stores, which the model can't
+override. Override per tool with
 `tools: { send_money: { permission: "payment:create", key: :to }, get_weather: false }`.
+
+Reviewer approvals cover one exact call (its arguments go with the request),
+and approvals and verifications are spent only on a call no other guard
+stops. Checks within a run go one at a time, so budgets hold under parallel
+tool calls. A task revoked in Scute ends the run for good.
 
 People in the loop, all with the task token:
 

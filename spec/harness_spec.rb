@@ -11,14 +11,16 @@ RSpec.describe Scute::Harness do
       expect(Scute::Harness::ToolSpec.permission_for("search")).to eq("search")
     end
 
-    it "finds the object and attributes in the arguments, with overrides" do
-      h = harness(FakeScute.new, tools: { send_money: { permission: "payment:create", key: :to, tier: :high }, get_weather: false })
+    it "finds the object in the arguments (never its attributes), with overrides" do
+      h = harness(FakeScute.new, tools: { send_money: { permission: "payment:create", key: :to, tier: :high,
+                                                        attributes: ->(a) { { currency: a[:currency] } } },
+                                          get_weather: false })
 
-      expect(h.spec("refund_invoice").resource(invoice_id: 42, amount: 90, note: { x: 1 }))
-        .to eq(type: "invoice", key: "42", attributes: { amount: 90 })
+      expect(h.spec("refund_invoice").resource(invoice_id: 42, amount: 90, note: { x: 1 })).to eq(type: "invoice", key: "42")
       expect(h.spec("reset_user_mfa").resource(userMfaId: "u1")).to eq(type: "user_mfa", key: "u1")
       expect(h.spec("send_money")).to have_attributes(permission: "payment:create", action: "create", tier: :high)
-      expect(h.spec("send_money").resource(to: "acct9", amount: 5)).to eq(type: "payment", key: "acct9", attributes: { amount: 5 })
+      expect(h.spec("send_money").resource(to: "acct9", amount: 5, currency: "EUR"))
+        .to eq(type: "payment", key: "acct9", attributes: { currency: "EUR" })
       expect(h.spec("get_weather").permission).to be_nil
     end
   end
@@ -35,7 +37,8 @@ RSpec.describe Scute::Harness do
       expect(fake.paths(mint_path).first.body).to include("acts_for" => "user1", "actions" => ["invoice:refund"], "ref" => "T-9")
       refund = fake.paths(check_path).find { |c| c.body["action"] == "refund" }
       expect(refund.auth).to eq("Bearer sct_token1")
-      expect(refund.body["resource"]).to eq("type" => "invoice", "key" => "42", "attributes" => { "amount" => 90 })
+      expect(refund.body["resource"]).to eq("type" => "invoice", "key" => "42")
+      expect(refund.body["context"]).to eq("args" => { "invoice_id" => 42, "amount" => 90 })
     end
 
     it "maps engine answers and tells the model what to do next" do
@@ -125,8 +128,8 @@ RSpec.describe Scute::Harness do
       expect(pending.message).to match(/The request is filed \(id req1\)/)
       expect(pending.say).to eq("I've asked for approval. I'll let you know when there's an answer.")
       expect(fake.paths("/v1/auth/app1/agent/approvals").first.body)
-        .to include("action" => "refund", "resource" => { "type" => "invoice", "key" => "42", "attributes" => { "amount" => 900 } },
-                    "reason" => "refund_invoice (invoice_id 42, amount 900)")
+        .to include("action" => "refund", "resource" => { "type" => "invoice", "key" => "42" },
+                    "reason" => "refund_invoice (invoice_id 42, amount 900)", "details" => { "invoice_id" => 42, "amount" => 900 })
       expect(run.approval_status("req1")["say"]).to eq("Still waiting.")
 
       fake.request_status = "approved"

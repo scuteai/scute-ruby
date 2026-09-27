@@ -27,6 +27,9 @@ module Scute
       @on_alert = on_alert
       @specs = {}
       @lock = Mutex.new
+      @log_lock = Mutex.new
+      # Guards that spend single-use proofs go last, in their listed order.
+      @ordered = @guards.reject { |g| runs_last?(g) } + @guards.select { |g| runs_last?(g) }
     end
 
     # Start (or resume, with the same id:) a job for the agent.
@@ -44,10 +47,11 @@ module Scute
       results = []
       winner = PROCEED
 
-      guards.each do |guard|
+      @ordered.each do |guard|
         next unless guard.respond_to?(:before)
 
         mode = call.mode = (guard.mode || @mode).to_sym
+        call.clear = winner.rank <= RANK[:transform]
         decision, error = ask(guard, :before, call)
         results << GuardResult.new(guard: guard.name, mode: mode, decision: decision, error: error)
 
@@ -71,7 +75,7 @@ module Scute
       current = result
       winner = PROCEED
 
-      guards.each do |guard|
+      @ordered.each do |guard|
         next unless guard.respond_to?(:after)
 
         mode = call.mode = (guard.mode || @mode).to_sym
@@ -97,11 +101,14 @@ module Scute
       current
     end
 
-    # @api private
+    # @api private: serialized in this process; across processes the store
+    # decides (use one with atomic writes for hard limits).
     def record_execution(key, tier)
-      recent = executions(key, 3600)
-      recent << { "at" => Time.now.to_f, "tier" => tier.to_s }
-      store.set(key, JSON.generate(recent), 3600)
+      @log_lock.synchronize do
+        recent = executions(key, 3600)
+        recent << { "at" => Time.now.to_f, "tier" => tier.to_s }
+        store.set(key, JSON.generate(recent), 3600)
+      end
     end
 
     # @api private
@@ -131,6 +138,8 @@ module Scute
       message = phase == :before ? "This action couldn't be checked safely right now." : "This result couldn't be checked safely, so it was withheld."
       [Decision.new(kind: :deny, reason: "guard_error", message: message), e]
     end
+
+    def runs_last?(guard) = guard.respond_to?(:runs_last?) && guard.runs_last?
 
     def named(decision, guard)
       decision.dup.tap { |d| d.guard = guard.name }

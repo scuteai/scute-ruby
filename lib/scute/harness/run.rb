@@ -36,7 +36,7 @@ module Scute
         @session_options = session || {}
         @context = context || {}
         @lock = Monitor.new
-        @kept = {}
+        @serial = Mutex.new
         @grounded = Set.new
         @identified = Set.new
         @tool_names = []
@@ -117,12 +117,18 @@ module Scute
       # ── Engine ──
 
       # @api private: Scute's engine on a call (agent roles, the person, the task).
-      def engine_check(call, context = nil)
+      # Tool arguments go as context.args, never as the object's attributes.
+      # proofs: send this run's verification and the approval filed for this
+      # exact call; they're single-use, so only on the pass nothing else stops.
+      def engine_check(call, context = nil, proofs: false)
         s = state
         key = approval_key(call)
-        approval = s["approvals"][key]
-        body = { action: call.spec.action, resource: call.resource, context: @context.merge(context || {}),
-                 challenge: s["challenges"][call.permission], approval: approval, session_id: s["session_id"] }.compact
+        filed = s["approvals"][key]
+        approval = filed["id"] if proofs && filed && filed["call"] == fingerprint(call.tool, call.args)
+        body = { action: call.spec.action, resource: call.resource,
+                 context: @context.merge(context || {}).merge(args: call.args),
+                 challenge: (s["challenges"][call.permission] if proofs), approval: approval,
+                 details: (call.args if approval), session_id: s["session_id"] }.compact
         decision = Authz::Decision.from_api(agent_call(:post, "/agent/check", body: body, idempotent: true))
         @lock.synchronize do
           if decision.reason == "task_closed"
@@ -138,18 +144,19 @@ module Scute
 
       # ── Checking calls ──
 
+      # One evaluation at a time per run: a call that may run takes its share
+      # of the budgets before the next check looks at them.
       def check(tool, args = {}, id: nil, messages: [], approved_by_user: false)
-        harness.evaluate(new_call(tool, args, id, messages, approved_by_user))
+        call = new_call(tool, args, id, messages, approved_by_user)
+        @serial.synchronize do
+          verdict = harness.evaluate(call)
+          reserve(call) if verdict.runs?
+          verdict
+        end
       end
 
-      # Record a call that ran and run the after-guards. Returns what the model should see.
+      # Run the after-guards on a call's result. Returns what the model should see.
       def after(tool, args, result, id: nil, messages: [])
-        spec = harness.spec(tool)
-        @lock.synchronize do
-          state["calls"] += 1
-          save
-        end
-        harness.record_execution(budget_key, spec.tier)
         harness.evaluate_after(new_call(tool, args, id, messages, false), result)
       end
 
@@ -164,12 +171,6 @@ module Scute
           after(tool, verdict.args, block.call(verdict.args))
         end
       end
-
-      # @api private
-      def keep(verdict) = @lock.synchronize { @kept[verdict.call_id] = verdict if verdict.runs? }
-
-      # @api private
-      def take(call_id) = @lock.synchronize { @kept.delete(call_id) }
 
       # ── Grounding, identity, usage, budgets ──
 
@@ -193,7 +194,14 @@ module Scute
       end
 
       # @api private: hourly budgets count per agent and person, across runs.
-      def budget_key = "scute:hour:#{harness.agent}:#{@acts_for || state['acts_for'] || 'none'}"
+      def budget_key
+        who = @acts_for || state["acts_for"]
+        if who.nil? && @given_token
+          me = whoami
+          who = me["acts_for"] || "task-#{me['task']}"
+        end
+        "scute:hour:#{harness.agent}:#{who || 'none'}"
+      end
 
       def recent_executions = harness.executions(budget_key, HOUR)
 
@@ -233,7 +241,20 @@ module Scute
                  messages: messages, approved_by_user: approved_by_user)
       end
 
-      def key = "scute:run:#{harness.agent}:#{id}"
+      # Keyed by who the run is for too: one id reused for someone else never
+      # sees the first person's task, verification or approvals.
+      def key
+        who = @acts_for || (@given_token ? "token-#{Digest::SHA256.hexdigest(@given_token)[0, 12]}" : "self")
+        "scute:run:#{harness.agent}:#{who}:#{id}"
+      end
+
+      def reserve(call)
+        @lock.synchronize do
+          state["calls"] += 1
+          save
+        end
+        harness.record_execution(budget_key, call.tier)
+      end
 
       def state
         @lock.synchronize do
@@ -293,8 +314,18 @@ module Scute
         end
       end
 
+      # A task token Scute says is dead before its expiry (revoked, completed,
+      # the agent suspended) closes the run for good; it's never re-minted.
       def agent_call(method, path, body: nil, idempotent: method == :get)
         harness.client.http.request(method, harness.client.auth_path(path), bearer: token, body: body, idempotent: idempotent)
+      rescue APIError => e
+        if e.status == 401 && e.code == "invalid_task_token" && (@given_token || (state["expires_at"] && Time.parse(state["expires_at"]) > Time.now))
+          @lock.synchronize do
+            state["closed"] = true
+            save
+          end
+        end
+        raise
       end
 
       def approval_key(call) = "#{call.permission}|#{Harness.resource_ref(call.resource)}"
