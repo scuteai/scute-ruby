@@ -1,0 +1,36 @@
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: enable
+  SuggestExtensions: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+Style/Documentation:
+  Enabled: false
+Layout/LineLength:
+  Max: 150
+Metrics/ClassLength:
+  Max: 250
+Metrics/ParameterLists:
+  Max: 10
+  CountKeywordArgs: false
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "*.gemspec"
+Metrics/ModuleLength:
+  Max: 250
+
+# The fake API is one routing table; splitting it hurts more than it helps.
+Metrics/AbcSize:
+  Max: 40
+  Exclude: ["spec/support/fake_scute.rb"]
+Metrics/CyclomaticComplexity:
+  Max: 14
+  Exclude: ["spec/support/fake_scute.rb"]
+Metrics/PerceivedComplexity:
+  Max: 14
+  Exclude: ["spec/support/fake_scute.rb"]
+Metrics/MethodLength:
+  Max: 30
+  Exclude: ["spec/support/fake_scute.rb"]
