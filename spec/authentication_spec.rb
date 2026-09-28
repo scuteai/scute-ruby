@@ -154,6 +154,23 @@ RSpec.describe "Authentication" do
       expect(fake.seen.size).to eq(Scute::Users::API::FIND_MAX_PAGES)
     end
 
+    it "lists a user's previous accounts and merges one in" do
+      previous = client.users.previous_accounts("user7")
+      expect(previous).to eq([{ "id" => "user2", "status" => "active", "created_at" => "2026-09-01T10:00:00Z",
+                                "deleted_at" => "2026-09-20T10:00:00Z", "roles" => 1, "passkeys" => 0, "mfa_methods" => ["totp"] }])
+
+      merged = client.users.merge("user7", from: "user2")
+      expect(merged).to eq("user_id" => "user7", "merged" => "user2",
+                           "moved" => { "roles" => 1, "resource_roles" => 0, "passkeys" => 0, "mfa_methods" => 1, "backup_codes" => 0 })
+      expect(fake.seen.last).to have_attributes(verb: :post, path: "/v1/app1/users/user7/merge", body: { "from" => "user2" }, auth: "Bearer sk_test")
+      expect(client.users.previous_accounts("user7").first["merged_into"]).to eq("user7")
+
+      expect { client.users.merge("user7", from: "user2") }
+        .to raise_error(Scute::APIError) { |e| expect([e.status, e.code]).to eq([422, "already_merged"]) }
+      expect { client.users.merge("user7", from: "nobody") }
+        .to raise_error(Scute::APIError) { |e| expect([e.status, e.code]).to eq([404, "not_found"]) }
+    end
+
     it "starts, lists and ends sessions as a user" do
       started = client.users.impersonate("user1", reason: "Ticket 4411", actor: { email: "support@acme.test" }, minutes: 15)
 
