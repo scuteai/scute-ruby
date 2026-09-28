@@ -113,8 +113,6 @@ RSpec.describe "Authentication" do
   describe "users and sessions" do
     it "manages users with the secret key" do
       expect(client.users.list(page: 2)["query"]).to eq("page=2")
-      expect(client.users.find_by_identifier("ada@example.com")).to eq("id" => "user1")
-      expect(client.users.find_by_identifier("bob@example.com")).to be_nil
       expect(client.users.create("ada@example.com", meta: { plan: "pro" })["user"]).to include("identifier" => "ada@example.com")
       client.users.deactivate("user1")
       client.users.update("user1", user_meta: { plan: "team" })
@@ -122,6 +120,38 @@ RSpec.describe "Authentication" do
       expect(fake.seen.map { |s| [s.verb, s.path] }).to include([:post, "/v1/app1/users/user1/deactivate"],
                                                                 [:patch, "/v1/app1/users/user1"])
       expect(fake.seen.last.auth).to eq("Bearer sk_test")
+    end
+
+    def searches = fake.paths("/v1/app1/users").map { |s| URI.decode_www_form(s.query.to_s).to_h }
+
+    it "finds a user by identifier exactly, through the loose user search" do
+      expect(client.users.find_by_identifier(" ADA@example.com ")["id"]).to eq("user1") # on page 2 of the search
+      expect(client.users.find_by_identifier("+1 (415) 555-0100")["id"]).to eq("user4")
+      expect(client.users.find_by_identifier("14155550101")["id"]).to eq("user5")
+
+      expect(searches.map { |q| q.values_at("q", "page", "limit") }).to eq(
+        [%w[ada@example.com 1 100], %w[ada@example.com 2 100], %w[14155550100 1 100], %w[14155550101 1 100], %w[14155550101 2 100]]
+      )
+      expect(fake.seen.map(&:auth).uniq).to eq(["Bearer sk_test"])
+    end
+
+    it "finds nobody without making anyone" do
+      expect(client.users.find_by_identifier("ada@example.co")).to be_nil # a near miss isn't a match
+      expect(client.users.find_by_identifier("+1 415 555 0199")).to be_nil
+      expect(searches.map { |q| q["page"] }).to eq(%w[1 2 3 1 2 3]) # every page, then stop
+
+      expect(client.users.find_by_identifier("  ")).to be_nil
+      expect(client.users.find_by_identifier("n/a")).to be_nil
+      expect(client.users.find_by_identifier(nil)).to be_nil
+      expect(fake.seen.size).to eq(6) # nothing to search for: no call
+      expect(fake.seen.map(&:path)).to all(eq("/v1/app1/users"))
+    end
+
+    it "stops the search after a bounded number of pages" do
+      fake.people = Array.new(40) { |n| { id: "u#{n}", email: "ada#{n}@example.com", phone: nil } }
+
+      expect(client.users.find_by_identifier("ada@example.com")).to be_nil
+      expect(fake.seen.size).to eq(Scute::Users::API::FIND_MAX_PAGES)
     end
 
     it "starts, lists and ends sessions as a user" do
@@ -143,6 +173,8 @@ RSpec.describe "Authentication" do
       expect { client.sessions.sign_out("tok") }.not_to raise_error
       expect(fake.seen.last).to have_attributes(verb: :delete, path: "/v1/auth/app1/current_user")
       expect(client.sessions.list("user1")).to eq([{ "id" => "ses1" }])
+      expect(fake.seen.last).to have_attributes(auth: "Bearer sk_test", path: "/v1/app1/users/user1/sessions")
+      expect(fake.seen.last.headers).not_to have_key("X-Authorization") # the secret key alone
     end
   end
 

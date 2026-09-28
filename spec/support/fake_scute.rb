@@ -10,7 +10,7 @@ class FakeScute
   Seen = Data.define(:verb, :path, :body, :auth, :headers, :query)
 
   attr_reader :seen
-  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status, :signing_keys, :revoked
+  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status, :signing_keys, :revoked, :people
 
   def initialize(decide: nil, ceiling: %w[invoice:read invoice:refund], request_status: "pending", ttl: 1800)
     @decide = decide
@@ -22,6 +22,15 @@ class FakeScute
     @verification_status = "pending"
     @signing_keys = []
     @revoked = []
+    # The app's users, for the user list's loose search (q=): like the real one,
+    # it answers more than exact matches, and this one pages by 2.
+    @people = [
+      { id: "user3", email: "adam@example.com", phone: nil },
+      { id: "user4", email: nil, phone: "+14155550100" },
+      { id: "user5", email: "ada@example.com.au", phone: "+14155550101" },
+      { id: "user1", email: "ada@example.com", phone: nil },
+      { id: "user6", email: "zoe@example.com", phone: nil }
+    ]
   end
 
   def paths(path) = seen.select { |s| s.path == path }
@@ -65,9 +74,12 @@ class FakeScute
     in [:post, "/v1/auth/app1/tokens/refresh"]
       json({ access: "new.access", refresh: "new.refresh", seen_refresh: headers["X-Refresh-Token"] })
     in [:get, "/v1/app1/users"]
-      json({ users: [{ id: "user1" }], query: query })
-    in [:get, "/v1/auth/app1/users"]
-      json({ user: query.to_s.include?("ada") ? { id: "user1" } : nil })
+      params = URI.decode_www_form(query.to_s).to_h
+      return json({ users: [{ id: "user1" }], query: query }) unless params.key?("q")
+
+      page = params.fetch("page", "1").to_i
+      more = page * 2 < people.size
+      json({ users: people[((page - 1) * 2), 2] || [], current_page: page, next_page: more ? page + 1 : nil, per_page: 2 })
     in [:post, "/v1/auth/app1/users"]
       json({ user: { id: "user2", identifier: body["identifier"] } }, 201)
     in [:post, %r{\A/v1/app1/users/[^/]+/(activate|deactivate)\z}] | [:patch, %r{\A/v1/app1/users/}] | [:delete, %r{\A/v1/app1/users/}]
