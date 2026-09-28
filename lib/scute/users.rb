@@ -62,6 +62,24 @@ module Scute
       def deactivate(id) = @client.request(:post, @client.app_path("/users/#{@client.esc(id)}/deactivate"))
       def delete(id) = @client.request(:delete, @client.app_path("/users/#{@client.esc(id)}"))
 
+      # Someone deleted who signs in again gets a fresh account (a new id).
+      # Their earlier, deleted accounts in this app, newest first: each has
+      # its id, status, created_at, deleted_at, merged_into (once merged), the
+      # number of roles and passkeys it holds, and its MFA methods.
+      def previous_accounts(id)
+        @client.request(:get, @client.app_path("/users/#{@client.esc(id)}/previous_accounts"))["previous_accounts"]
+      end
+
+      # Merge one of those deleted accounts (from:, its id) into this live
+      # one. Roles, object roles, passkeys, MFA methods and unused backup codes
+      # move over; meta and authorization attributes merge, the live account
+      # winning where both have a value. History stays on the old account.
+      # Answers { "user_id", "merged", "moved" => { "roles" => n, ... } }; an
+      # account merged before is an APIError with code "already_merged".
+      def merge(id, from:)
+        @client.request(:post, @client.app_path("/users/#{@client.esc(id)}/merge"), body: { from: from })
+      end
+
       # ── Signing in as a user (support access) ──
       # Off until the app turns it on (authz settings: impersonation). The
       # session is short, never refreshed, and its token names who is really

@@ -31,6 +31,7 @@ class FakeScute
       { id: "user1", email: "ada@example.com", phone: nil },
       { id: "user6", email: "zoe@example.com", phone: nil }
     ]
+    @merged = []
   end
 
   def paths(path) = seen.select { |s| s.path == path }
@@ -94,6 +95,19 @@ class FakeScute
       json({ impersonations: [{ session_id: "ses1" }] })
     in [:delete, "/v1/apps/app1/users/user1/impersonate"]
       json({ ended: 1 })
+    in [:get, "/v1/app1/users/user7/previous_accounts"]
+      return json({ error: "Unauthorized" }, 401) unless secret
+
+      previous = { id: "user2", status: "active", created_at: "2026-09-01T10:00:00Z", deleted_at: "2026-09-20T10:00:00Z",
+                   merged_into: (@merged.include?("user2") ? "user7" : nil), roles: 1, passkeys: 0, mfa_methods: ["totp"] }
+      json({ previous_accounts: [previous.compact] })
+    in [:post, "/v1/app1/users/user7/merge"]
+      return json({ error: "Unauthorized" }, 401) unless secret
+      return json({ error: "Previous account not found", error_code: "not_found" }, 404) unless body["from"] == "user2"
+      return json({ error: "That account was already merged", error_code: "already_merged" }, 422) if @merged.include?("user2")
+
+      @merged << "user2"
+      json({ user_id: "user7", merged: "user2", moved: { roles: 1, resource_roles: 0, passkeys: 0, mfa_methods: 1, backup_codes: 0 } })
     in [:get, "/v1/app1/users/user1/sessions"]
       json([{ id: "ses1" }])
     in [:post, "/v1/apps/app1/authz/agents/support-bot/tasks"]

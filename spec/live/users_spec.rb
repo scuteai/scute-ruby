@@ -67,4 +67,57 @@ RSpec.describe "Live: users (scute-ruby, secret key)", :live, order: :defined do
     expect(client.users.delete(@user[:id])).to include("message" => "ok")
     expect { client.users.get(@user[:id]) }.to raise_error(Scute::APIError) { |e| expect(e.status).to eq(404) }
   end
+
+  describe "a deleted user who signs in again" do
+    before(:context) { @again = { email: world.next_email } }
+
+    it "gets a fresh account (a new id); the old one is gone" do
+      first = world.sign_in(@again[:email])
+      @again[:old] = first["user_id"]
+      world.grant(@again[:old], "viewer")
+      client.users.delete(@again[:old])
+
+      second = world.sign_in(@again[:email])
+      @again[:new] = second["user_id"]
+
+      expect(@again[:new]).to be_a(String)
+      expect(@again[:new]).not_to eq(@again[:old])
+      expect(client.tokens.verify(second["access"]).user_id).to eq(@again[:new])
+      expect { client.users.get(@again[:old]) }.to raise_error(Scute::APIError) { |e| expect(e.status).to eq(404) }
+      expect(client.authz.check(user_id: @again[:new], action: "read", resource: "invoice:INV-1")).to be_denied
+    end
+
+    it "lists the old account (users.previous_accounts)" do
+      previous = client.users.previous_accounts(@again[:new])
+
+      expect(previous.map { |a| a["id"] }).to eq([@again[:old]])
+      expect(previous.first).to include("roles" => 1, "passkeys" => 0, "mfa_methods" => [])
+      expect(previous.first["deleted_at"]).to be_a(String)
+      expect(previous.first).not_to have_key("merged_into")
+    end
+
+    it "merges it in (users.merge): its role moves over, and it can't be merged twice" do
+      merged = client.users.merge(@again[:new], from: @again[:old])
+      world.track_grant(@again[:new], "viewer")
+
+      expect(merged).to include("user_id" => @again[:new], "merged" => @again[:old])
+      expect(merged["moved"]).to include("roles" => 1, "passkeys" => 0)
+      expect(client.authz.check(user_id: @again[:new], action: "read", resource: "invoice:INV-1")).to be_allowed
+      expect(client.users.previous_accounts(@again[:new]).first).to include("merged_into" => @again[:new])
+      expect { client.users.merge(@again[:new], from: @again[:old]) }
+        .to raise_error(Scute::APIError) { |e| expect([e.status, e.code]).to eq([422, "already_merged"]) }
+    end
+  end
+
+  it "refuses sign-in for someone deactivated and then deleted (403 account_deactivated)" do
+    email = world.next_email
+    user = client.users.create(email)["user"]
+    world.track_user(user["id"])
+    client.users.deactivate(user["id"])
+    client.users.delete(user["id"])
+
+    refused = api.post(world.auth("/otps/login"), body: { identifier: email }, as: :public)
+
+    expect([refused.status, refused["error_code"]]).to eq([403, "account_deactivated"])
+  end
 end

@@ -58,6 +58,8 @@ scute.users.find_by_identifier("ada@example.com") # or "+14155550123"; nil when 
 scute.users.list(page: 1)
 scute.users.update(id, user_meta: { plan: "team" })
 scute.users.deactivate(id) / activate(id) / delete(id)
+scute.users.previous_accounts(id)          # their earlier, deleted accounts
+scute.users.merge(id, from: previous_id)   # move one of those into this live account
 
 scute.sessions.list(user_id)
 scute.sessions.revoke(user_id, session_id)
@@ -70,6 +72,14 @@ scute.sessions.sign_out(access_token)
 as digits (include the country code), and never creates a user.
 `sessions.list` and `sessions.revoke` need only the secret key, no user
 session. Meta keys have to be user meta fields the app declares.
+
+Someone deleted who signs in again gets a fresh account with a new id.
+`previous_accounts` lists their earlier, deleted accounts, and `merge`
+brings one into the live account: roles, object roles, passkeys, MFA
+methods and unused backup codes move over, meta and attributes merge (the
+live account wins), and history stays on the old account. An account can
+be merged once (`already_merged` after that). Someone deactivated and then
+deleted can't sign in again this way (`account_deactivated`).
 
 ### Signing in as a user (support access)
 
@@ -219,7 +229,9 @@ and each spec says so):
 - MFA (no scute-ruby API, over HTTP): TOTP enrollment with codes computed
   per RFC 6238, sign-in that needs MFA, backup codes, removing the method.
 - Users: create, get, find by identifier, list, update, deactivate,
-  activate, delete.
+  activate, delete; a deleted user signing in again (a fresh account,
+  `previous_accounts`, `merge`), and someone deactivated and deleted
+  refused at sign-in.
 - Signing in as a user: `impersonate` (the `act` claim), `impersonations`,
   a "not while impersonating" permission denied, `stop_impersonating`.
 - Authorization: policy import, role assignment, `check`, `check_batch`,
