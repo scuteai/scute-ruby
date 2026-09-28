@@ -70,6 +70,25 @@ module Scute
         @lock.synchronize { @whoami ||= agent_call(:get, "/agent/whoami") }
       end
 
+      # A secret the app keeps in Scute (a property), read at call time inside
+      # a tool. Only listed agents can read it, only while the task is live
+      # (and allowed the property's permission, when it names one). Use it,
+      # don't return it: it should never reach the model.
+      #
+      #   refund: ->(args) { Stripe::Refund.create(args, api_key: run.property("stripe")) }
+      def property(name)
+        agent_call(:get, "/agent/properties/#{harness.client.esc(name)}")["value"]
+      end
+
+      # Sign with one of the app's key pairs: claims: -> { "jws" => ... },
+      # data: (base64url) -> { "signature" => ... }. The private key never
+      # leaves Scute; public keys are at /v1/auth/:app_id/properties/:name/jwks.json.
+      def sign(name, claims: nil, data: nil)
+        raise ArgumentError, "Pass claims: or data:" if claims.nil? && data.nil?
+
+        agent_call(:post, "/agent/properties/#{harness.client.esc(name)}/sign", body: claims ? { claims: claims } : { data: data })
+      end
+
       # The job is done: close the task (and its session).
       def complete! = close!(:complete)
 

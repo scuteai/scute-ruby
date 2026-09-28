@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Properties: `run.property(name)` reads one of the app's secrets inside a tool with the task token; `run.sign(name, claims:)` / `sign(name, data:)` signs with one of the app's key pairs (the private key never leaves Scute).
+
 ## 0.2.0
 
 - Authentication: `scute.tokens.verify` checks your users' access tokens locally (RS256 with the app's JWKS, cached, re-read on key rotation at most once a minute, expiry with 30s leeway, the token must be this app's, user sessions only). `remote: true` also asks Scute that the session is live.
