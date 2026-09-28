@@ -165,23 +165,24 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
   end
 
   describe "plans, previews, tool drift and decoys" do
-    # The API routes for these are merged but not deployed on scute-api-v2
-    # yet. Remove this hook once they are.
-    before { skip("waits for the API deploy") }
-
     it "files a plan for two calls; once it's approved, each runs once (run.request_plan, run.plan_status)" do
       run = run_for(%w[invoice:void])
       plan = run.request_plan([{ tool: "void_invoice", args: { invoice_id: "INV-P1" } },
                                { tool: "void_invoice", args: { invoice_id: "INV-P2" } }], reason: "#{world.prefix}: two voids")
-      expect(plan).to include("status" => "pending")
-      expect(plan["steps"].map { |step| step["needs"] }).to eq(%w[approval approval])
+      expect(plan).to include("id" => a_kind_of(String), "status" => "pending", "say" => a_kind_of(String))
+      expect(plan["steps"].map { |step| step.values_at("permission", "resource", "details", "needs") })
+        .to eq([["invoice:void", "invoice:INV-P1", { "invoice_id" => "INV-P1" }, "approval"],
+                ["invoice:void", "invoice:INV-P2", { "invoice_id" => "INV-P2" }, "approval"]])
+      expect(run.plan_status).to include("id" => plan["id"], "status" => "pending")
 
       client.authz.decide_request(plan["id"], :approve, note: "live #{world.run_id}")
 
       expect(run.check("void_invoice", { invoice_id: "INV-P1" }).kind).to eq(:proceed)
       expect(run.check("void_invoice", { invoice_id: "INV-P2" }).kind).to eq(:proceed)
       expect(run.plan_status["steps"].map { |step| step["used"] }).to eq([true, true])
-      expect(run.check("void_invoice", { invoice_id: "INV-P1" }).kind).not_to eq(:proceed) # each step runs once
+      again = run.check("void_invoice", { invoice_id: "INV-P1" }) # each step runs once
+      expect(again.kind).to eq(:approve)
+      client.authz.decide_request(again.decision.approve[:request_id], :deny, note: "live #{world.run_id}") # don't leave it pending
     end
 
     it "previews a call without using anything up (run.preview)" do
@@ -189,15 +190,26 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
       expect(run.preview("refund_invoice", { invoice_id: "INV-P3" })).to be_step_up
       expect(run.check("refund_invoice", { invoice_id: "INV-P3" }).kind).to eq(:verify)
+
+      # Nor toward a budget: the budget agent is already over its budget of 2
+      # in this window (see above), so a check that counted would pause it.
+      budget_slug = world.agent("budget")["slug"]
+      budget_run = world.harness(budget_slug).run(task: { actions: %w[invoice:read] })
+      3.times { |i| expect(budget_run.preview("read_invoice", { invoice_id: "INV-P#{i + 4}" })).to be_allowed }
+      expect(client.agents.get(budget_slug)).to include("status" => "active")
     end
 
     it "reports the tool definitions and notices one that changed (run.report_tools)" do
       run = world.harness(world.agent("drift")["slug"]).run(task: { actions: %w[invoice:read] })
       tool = { name: "refund_invoice", description: "Refund an invoice", input_schema: { type: "object" } }
 
-      expect(run.report_tools([tool])).to include("known" => 1, "changed" => [])
-      expect(run.report_tools([tool])).to include("known" => 1, "changed" => [])
-      expect(run.report_tools([tool.merge(description: "Refund an invoice, then something else")])).to include("changed" => ["refund_invoice"])
+      other = { name: "void_invoice", description: "Void an invoice" }
+
+      expect(run.report_tools([tool])).to eq("known" => 1, "new" => [], "changed" => []) # the baseline
+      expect(run.report_tools([tool])).to eq("known" => 1, "new" => [], "changed" => [])
+      expect(run.report_tools([tool, other])).to eq("known" => 1, "new" => ["void_invoice"], "changed" => [])
+      expect(run.report_tools([tool.merge(description: "Refund an invoice, then something else")]))
+        .to eq("known" => 0, "new" => [], "changed" => ["refund_invoice"])
     end
 
     it "refuses a decoy tool, and Scute pauses the agent (Scute::Guards.decoy)" do
@@ -207,7 +219,9 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
       verdict = run.check("export_all_customers", {})
 
+      expect(verdict.kind).to eq(:deny)
       expect(verdict.decision.reason).to eq("decoy_called")
+      expect(verdict.message).to include("I can't continue with this. A person will follow up.")
       expect(run.snapshot["closed"]).to be(true)
       expect(client.agents.get(slug)).to include("status" => "suspended")
       expect(client.agents.resume(slug)).to include("status" => "active")
