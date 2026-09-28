@@ -189,6 +189,73 @@ Scute::Guards.define("no-weekend-refunds") do |call|
 end
 ```
 
+## Live suite
+
+`bundle exec rspec` runs against a fake API. `spec/live` runs scute-ruby
+against a real Scute API instead, with no fakes:
+
+```sh
+bundle exec rake live
+```
+
+Without credentials it prints one line saying so and exits 0, so it's safe
+anywhere. `bundle exec rspec` and CI never run it.
+
+What it covers (the parts scute-ruby has no method for go over plain HTTP,
+and each spec says so):
+
+- The app: its data and the signing keys.
+- Sign-in: email OTP and SMS OTP with test identities (over HTTP: that's
+  the end user's side), then `sessions.current_user`, `refresh`,
+  `sign_out`, `list` and `revoke`.
+- Tokens: `tokens.verify` with the app's JWKS (tampered, expired and
+  not-this-app tokens refused), `remote: true`, and `Scute::Authentication`
+  / `Scute::Authorization` in a small Rack app (Rack::MockRequest).
+- MFA (no scute-ruby API, over HTTP): TOTP enrollment with codes computed
+  per RFC 6238, sign-in that needs MFA, backup codes, removing the method.
+- Users: create, get, find by identifier, list, update, deactivate,
+  activate, delete.
+- Signing in as a user: `impersonate` (the `act` claim), `impersonations`,
+  a "not while impersonating" permission denied, `stop_impersonating`.
+- Authorization: policy import, role assignment, `check`, `check_batch`,
+  `permissions`, `authorized_users`, `filter`, step-ups, the signed
+  snapshot, access requests.
+- Agents: `agents.create`, tasks, `Scute::Harness` checks (allowed,
+  outside the task, beyond the agent's roles), human steps with a test
+  identity, reviewer approvals, `run.property` and `run.sign` (verified
+  with the property's JWKS), suspend and resume, a budget of 2 that pauses
+  the agent on its 3rd action.
+- Auth MCP: JSON-RPC over HTTP with an agent key (`scute_identify`,
+  `scute_submit_code`, `scute_check`), then the backend's conversation
+  lookup and check.
+- The decision log: rows for the checks above.
+
+It signs in only test identities (`live-ruby-<run>-<n>+scute_test@example.com`
+and +1 312 555 01xx), which always get the code 424242 and are sent nothing.
+Everything it makes is named `live-<run>` and removed at the end, failures
+or not; the app's policy and settings are put back as they were. Tokens,
+secrets and codes other than 424242 never reach the output.
+
+### Credentials
+
+The suite needs its own app on a non-production API with test identities
+allowed. Make one (and a fresh secret) with:
+
+```sh
+heroku run -a scute-api-v2 rake "sdk_live:setup[ruby]"
+```
+
+It prints three lines. Put them in `.sdk-live/ruby.env` in the folder that
+holds this checkout (outside the repo, never committed):
+
+```sh
+SCUTE_LIVE_BASE_URL=https://...
+SCUTE_LIVE_APP_ID=app_...
+SCUTE_LIVE_SECRET=...
+```
+
+or export them, or point `SCUTE_LIVE_ENV_FILE` at another file.
+
 ## License
 
 MIT
