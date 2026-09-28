@@ -33,8 +33,8 @@ RSpec.describe "Live: the decision log (read over HTTP)", :live, order: :defined
   it "has the agent's checks too, with its task" do
     agent = world.agent("support")
     run = world.harness(agent["slug"]).run(acts_for: @log[:user]["id"], task: { actions: %w[invoice:read invoice:void] })
-    run.check("read_invoice", invoice_id: "LOG-2")
-    run.check("void_invoice", invoice_id: "LOG-2")
+    run.check("read_invoice", { invoice_id: "LOG-2" })
+    run.check("void_invoice", { invoice_id: "LOG-2" })
 
     found = rows(task_id: run.task_id) { |r| r.size >= 2 }
 

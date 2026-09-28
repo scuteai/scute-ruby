@@ -233,8 +233,13 @@ and each spec says so):
 It signs in only test identities (`live-ruby-<run>-<n>+scute_test@example.com`
 and +1 312 555 01xx), which always get the code 424242 and are sent nothing.
 Everything it makes is named `live-<run>` and removed at the end, failures
-or not; the app's policy and settings are put back as they were. Tokens,
-secrets and codes other than 424242 never reach the output.
+or not; the app's policy and settings are put back as they were. (Access
+requests and decision log rows stay: the API has no way to delete them.)
+Tokens, secrets and codes other than 424242 never reach the output.
+
+Examples marked pending are known SDK bugs, each with the reason. RSpec
+fails a pending example once it passes, so a fix shows up as a failure
+until the `pending` line goes.
 
 ### Credentials
 

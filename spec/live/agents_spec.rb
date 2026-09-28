@@ -44,17 +44,17 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
   it "lets a call through that the agent, the person and the task all allow (check, wrap)" do
     run = run_for(%w[invoice:read])
 
-    expect(run.check("read_invoice", invoice_id: "INV-1").kind).to eq(:proceed)
+    expect(run.check("read_invoice", { invoice_id: "INV-1" }).kind).to eq(:proceed)
     read = run.wrap("read_invoice") { |args| { "invoice" => args[:invoice_id] } }
     expect(read.call(invoice_id: "INV-1")).to eq("invoice" => "INV-1")
   end
 
   it "denies outside the task, and beyond the agent's roles" do
-    outside = run_for(%w[invoice:read]).check("void_invoice", invoice_id: "INV-1")
+    outside = run_for(%w[invoice:read]).check("void_invoice", { invoice_id: "INV-1" })
     expect(outside.kind).to eq(:deny)
     expect(outside.decision.reason).to eq("outside_task")
 
-    beyond = run_for.check("delete_account", account_id: "1")
+    beyond = run_for.check("delete_account", { account_id: "1" })
     expect(beyond.kind).to eq(:deny)
     expect(beyond.decision.reason).to eq("agent_role")
 
@@ -64,7 +64,7 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
   it "steps up through human steps with a test identity (424242)" do
     run = run_for(%w[invoice:refund])
-    first = run.check("refund_invoice", invoice_id: "INV-2")
+    first = run.check("refund_invoice", { invoice_id: "INV-2" })
     expect(first.kind).to eq(:verify)
 
     started = run.start_verification(verdict: first)
@@ -73,12 +73,12 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
     expect(run.submit_code("000000")["status"]).to eq("pending")
     expect(run.submit_code(ScuteLive::World::CODE)).to include("status" => "completed", "say" => "Thanks, you're verified.")
-    expect(run.check("refund_invoice", invoice_id: "INV-2").kind).to eq(:proceed)
+    expect(run.check("refund_invoice", { invoice_id: "INV-2" }).kind).to eq(:proceed)
   end
 
   it "files a reviewer approval for the exact call; once approved, that call runs" do
     run = run_for(%w[invoice:void])
-    first = run.check("void_invoice", invoice_id: "INV-3", amount: 10)
+    first = run.check("void_invoice", { invoice_id: "INV-3", amount: 10 })
     expect(first.kind).to eq(:approve)
     request_id = first.decision.approve[:request_id]
     expect(request_id).to be_a(String)
@@ -86,7 +86,7 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
     client.authz.decide_request(request_id, :approve, note: "live #{world.run_id}")
 
-    expect(run.check("void_invoice", invoice_id: "INV-3", amount: 10).kind).to eq(:proceed)
+    expect(run.check("void_invoice", { invoice_id: "INV-3", amount: 10 }).kind).to eq(:proceed)
   end
 
   # scute-ruby has no property methods: they're made over HTTP (POST /v1/apps/:app_id/properties).
@@ -135,13 +135,13 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
 
   it "suspends the agent (every task ends) and resumes it" do
     run = run_for(%w[invoice:read])
-    expect(run.check("read_invoice", invoice_id: "INV-4").kind).to eq(:proceed)
+    expect(run.check("read_invoice", { invoice_id: "INV-4" }).kind).to eq(:proceed)
 
     expect(client.agents.suspend(slug)).to include("status" => "suspended")
-    expect(run.check("read_invoice", invoice_id: "INV-4").kind).to eq(:deny)
+    expect(run.check("read_invoice", { invoice_id: "INV-4" }).kind).to eq(:deny)
 
     expect(client.agents.resume(slug)).to include("status" => "active")
-    expect(run_for(%w[invoice:read]).check("read_invoice", invoice_id: "INV-4").kind).to eq(:proceed)
+    expect(run_for(%w[invoice:read]).check("read_invoice", { invoice_id: "INV-4" }).kind).to eq(:proceed)
   end
 
   it "pauses an agent with a budget of 2 on its 3rd action" do
@@ -150,7 +150,7 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
     expect(updated.dig("settings", "budget")).to include("max_actions" => 2)
 
     run = world.harness(budget_slug).run(task: { actions: %w[invoice:read] }) # on its own: invoice:read is autonomous_allowed
-    verdicts = Array.new(3) { |i| run.check("read_invoice", invoice_id: "INV-B#{i}") }
+    verdicts = Array.new(3) { |i| run.check("read_invoice", { invoice_id: "INV-B#{i}" }) }
 
     expect(verdicts.map(&:kind)).to eq(%i[proceed proceed deny])
     expect(verdicts.last.decision.reason).to eq("budget_exceeded")

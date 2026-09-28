@@ -12,7 +12,8 @@ module ScuteLive
   class Api
     class Failure < StandardError; end
 
-    SENSITIVE = %w[access refresh csrf token key secret value backup_codes jws signature assertion provisioning_uri].freeze
+    # Agent keys (scak_) and task tokens (sct_) are caught by their shape; "key" and "value" are too common to list.
+    SENSITIVE = %w[access refresh csrf token secret backup_codes jws signature assertion provisioning_uri].freeze
 
     Response = Struct.new(:status, :body, :headers) do
       def ok? = status.between?(200, 299)
