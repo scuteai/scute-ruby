@@ -20,6 +20,8 @@ module Scute
       attr_reader :harness, :id
 
       include HumanSteps
+      include Plans
+      include ToolReports
 
       # acts_for: the app user the agent works for (omit for an agent on its own).
       # task: { actions:, resources:, ttl:, ref: } narrows the task.
@@ -135,22 +137,29 @@ module Scute
 
       # ── Engine ──
 
+      # Reasons that end a run for good: the task is over, or Scute paused the
+      # agent for going over its budget (and ended its tasks).
+      CLOSING_REASONS = %w[task_closed budget_exceeded].freeze
+
       # @api private: Scute's engine on a call (agent roles, the person, the task).
       # Tool arguments go as context.args, never as the object's attributes.
       # proofs: send this run's verification and the approval filed for this
-      # exact call; they're single-use, so only on the pass nothing else stops.
+      # exact call (or, without one, this run's plan: its approved step for
+      # these exact arguments); they're single-use, so only on the pass
+      # nothing else stops.
       def engine_check(call, context = nil, proofs: false)
         s = state
         key = approval_key(call)
         filed = s["approvals"][key]
         approval = filed["id"] if proofs && filed && filed["call"] == fingerprint(call.tool, call.args)
+        plan = s["plan_id"] if proofs && approval.nil?
         body = { action: call.spec.action, resource: call.resource,
                  context: @context.merge(context || {}).merge(args: call.args),
-                 challenge: (s["challenges"][call.permission] if proofs), approval: approval,
-                 details: (call.args if approval), session_id: s["session_id"] }.compact
+                 challenge: (s["challenges"][call.permission] if proofs), approval: approval, plan: plan,
+                 details: (call.args if approval || plan), session_id: s["session_id"] }.compact
         decision = Authz::Decision.from_api(agent_call(:post, "/agent/check", body: body, idempotent: true))
         @lock.synchronize do
-          if decision.reason == "task_closed"
+          if CLOSING_REASONS.include?(decision.reason)
             state["closed"] = true
             save
           elsif approval && decision.allowed?

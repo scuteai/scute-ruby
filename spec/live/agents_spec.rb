@@ -155,6 +155,62 @@ RSpec.describe "Live: agents and the harness", :live, order: :defined do
     expect(verdicts.map(&:kind)).to eq(%i[proceed proceed deny])
     expect(verdicts.last.decision.reason).to eq("budget_exceeded")
     expect(client.agents.get(budget_slug)).to include("status" => "suspended", "suspended_reason" => a_string_including("budget"))
+
+    # The run is over for good: it never mints a new task for the paused agent.
+    expect(run.snapshot["closed"]).to be(true)
+    expect { run.token }.to raise_error(Scute::APIError) { |e| expect(e.code).to eq("task_closed") }
     expect(client.agents.resume(budget_slug)).to include("status" => "active")
+    expect(run.check("read_invoice", { invoice_id: "INV-B3" }).kind).to eq(:deny)
+    expect(client.agents.tasks(budget_slug).size).to eq(1)
+  end
+
+  describe "plans, previews, tool drift and decoys" do
+    # The API routes for these are merged but not deployed on scute-api-v2
+    # yet. Remove this hook once they are.
+    before { skip("waits for the API deploy") }
+
+    it "files a plan for two calls; once it's approved, each runs once (run.request_plan, run.plan_status)" do
+      run = run_for(%w[invoice:void])
+      plan = run.request_plan([{ tool: "void_invoice", args: { invoice_id: "INV-P1" } },
+                               { tool: "void_invoice", args: { invoice_id: "INV-P2" } }], reason: "#{world.prefix}: two voids")
+      expect(plan).to include("status" => "pending")
+      expect(plan["steps"].map { |step| step["needs"] }).to eq(%w[approval approval])
+
+      client.authz.decide_request(plan["id"], :approve, note: "live #{world.run_id}")
+
+      expect(run.check("void_invoice", { invoice_id: "INV-P1" }).kind).to eq(:proceed)
+      expect(run.check("void_invoice", { invoice_id: "INV-P2" }).kind).to eq(:proceed)
+      expect(run.plan_status["steps"].map { |step| step["used"] }).to eq([true, true])
+      expect(run.check("void_invoice", { invoice_id: "INV-P1" }).kind).not_to eq(:proceed) # each step runs once
+    end
+
+    it "previews a call without using anything up (run.preview)" do
+      run = run_for(%w[invoice:refund])
+
+      expect(run.preview("refund_invoice", { invoice_id: "INV-P3" })).to be_step_up
+      expect(run.check("refund_invoice", { invoice_id: "INV-P3" }).kind).to eq(:verify)
+    end
+
+    it "reports the tool definitions and notices one that changed (run.report_tools)" do
+      run = world.harness(world.agent("drift")["slug"]).run(task: { actions: %w[invoice:read] })
+      tool = { name: "refund_invoice", description: "Refund an invoice", input_schema: { type: "object" } }
+
+      expect(run.report_tools([tool])).to include("known" => 1, "changed" => [])
+      expect(run.report_tools([tool])).to include("known" => 1, "changed" => [])
+      expect(run.report_tools([tool.merge(description: "Refund an invoice, then something else")])).to include("changed" => ["refund_invoice"])
+    end
+
+    it "refuses a decoy tool, and Scute pauses the agent (Scute::Guards.decoy)" do
+      slug = world.agent("decoy")["slug"]
+      guards = [Scute::Guards.decoy(["export_all_customers"]), Scute::Guards.permissions]
+      run = world.harness(slug, guards: guards).run(task: { actions: %w[invoice:read] })
+
+      verdict = run.check("export_all_customers", {})
+
+      expect(verdict.decision.reason).to eq("decoy_called")
+      expect(run.snapshot["closed"]).to be(true)
+      expect(client.agents.get(slug)).to include("status" => "suspended")
+      expect(client.agents.resume(slug)).to include("status" => "active")
+    end
   end
 end
