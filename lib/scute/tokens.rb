@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "base64"
 require "json"
 require "openssl"
 
@@ -146,6 +145,11 @@ module Scute
       OpenSSL::PKey::RSA.new(spki.to_der)
     end
 
-    def b64(value) = Base64.urlsafe_decode64(value.to_s + ("=" * ((4 - (value.to_s.length % 4)) % 4)))
+    # base64url without the base64 gem (it isn't a default gem from Ruby 3.4).
+    # "m0" is strict, like Base64.urlsafe_decode64: bad input raises ArgumentError.
+    def b64(value)
+      s = value.to_s.tr("-_", "+/")
+      (s + ("=" * ((4 - (s.length % 4)) % 4))).unpack1("m0")
+    end
   end
 end
