@@ -22,9 +22,27 @@ module Scute
 
       def get(id) = @client.request(:get, @client.app_path("/users/#{@client.esc(id)}"))
 
-      # By email or phone; nil when nobody by that identifier uses the app.
+      FIND_PAGE_SIZE = 100
+      FIND_MAX_PAGES = 10
+
+      # The app's user with this email (any case) or phone number (compared as
+      # digits, so include the country code), as users.get shows it; nil when
+      # nobody by that identifier uses the app. Never creates a user.
+      #
+      # Searches the app's users with the secret key (list with q:, a loose
+      # search over email, phone and name) and keeps only an exact match,
+      # looking at up to FIND_MAX_PAGES pages of FIND_PAGE_SIZE.
       def find_by_identifier(identifier)
-        @client.request(:get, @client.auth_path("/users?identifier=#{@client.esc(identifier)}"))["user"]
+        query, same = exact_match(identifier.to_s.strip)
+        return nil if query.empty?
+
+        (1..FIND_MAX_PAGES).each do |page|
+          data = list(q: query, limit: FIND_PAGE_SIZE, page: page) || {}
+          found = Array(data["users"]).find(&same)
+          return found if found
+          break unless data["next_page"]
+        end
+        nil
       end
 
       def create(identifier, meta: nil)
@@ -68,6 +86,19 @@ module Scute
       def stop_impersonating(id, session_id: nil)
         query = session_id ? "?session_id=#{@client.esc(session_id)}" : ""
         @client.request(:delete, @client.apps_path("/users/#{@client.esc(id)}/impersonate#{query}"))
+      end
+
+      private
+
+      # [what to search for, whether a listed user is exactly that one]
+      def exact_match(wanted)
+        if wanted.include?("@")
+          email = wanted.downcase
+          [email, ->(user) { user["email"].to_s.strip.downcase == email }]
+        else
+          digits = wanted.delete("^0-9")
+          [digits, ->(user) { user["phone"].to_s.delete("^0-9") == digits }]
+        end
       end
     end
   end

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `users.find_by_identifier` searches the app's users with the secret key and keeps only an exact match: the email in any case, or the phone number as digits. It returns nil when nobody by that identifier uses the app, never creates a user, makes no call for a blank identifier, and looks at up to 10 pages of 100.
+- `sessions.list` and `sessions.revoke` are documented as working with the secret key alone.
 - Properties: `run.property(name)` reads one of the app's secrets inside a tool with the task token; `run.sign(name, claims:)` / `sign(name, data:)` signs with one of the app's key pairs (the private key never leaves Scute).
 
 ## 0.2.0

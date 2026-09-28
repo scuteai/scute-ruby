@@ -44,21 +44,19 @@ RSpec.describe "Live: sign-in and sessions", :live, order: :defined do
       expect(client.sessions.current_user(tokens["access"])["user"]["phone"].to_s.delete("^0-9")).to eq(@sms[:phone].delete("^0-9"))
     end
 
-    it "lists the user's sessions (sessions.list, secret key)" do
-      pending("sessions.list answers 401 Not authorized: the endpoint also wants a user session in X-Authorization, which the SDK doesn't send")
+    it "lists the user's sessions (sessions.list, the secret key alone)" do
       sessions = client.sessions.list(@sms[:user_id])
 
       expect(sessions).to be_an(Array)
-      expect(sessions).not_to be_empty
+      expect(sessions).to all(include("id"))
+      @sms[:session_id] = sessions.max_by { |s| s["created_at"].to_s }&.dig("id")
+      expect(@sms[:session_id]).to be_a(String)
     end
 
-    it "revokes a session (sessions.revoke, secret key); the remote check refuses its token, the local one can't tell" do
-      # The session's id, read with what the API accepts (the secret plus the user's session).
-      listed = api.get!("/v1/#{app_id}/users/#{@sms[:user_id]}/sessions", headers: { "X-Authorization" => @sms[:tokens]["access"] })
-      session_id = listed.max_by { |s| s["created_at"].to_s }["id"]
+    it "revokes a session (sessions.revoke, the secret key alone); the remote check refuses its token, the local one can't tell" do
+      skip "needs the session id from sessions.list" unless @sms[:session_id]
 
-      pending("sessions.revoke answers 401 Not authorized: the endpoint also wants a user session in X-Authorization, which the SDK doesn't send")
-      client.sessions.revoke(@sms[:user_id], session_id)
+      client.sessions.revoke(@sms[:user_id], @sms[:session_id])
 
       expect(client.tokens.verify(@sms[:tokens]["access"]).user_id).to eq(@sms[:user_id])
       expect { client.tokens.verify(@sms[:tokens]["access"], remote: true) }
@@ -77,10 +75,10 @@ RSpec.describe "Live: sign-in and sessions", :live, order: :defined do
     end
 
     it "the refreshed token verifies locally (tokens.verify)" do
-      pending("sessions.refresh returns a token whose aid is the app's internal id instead of its public app id, " \
-              "so tokens.verify refuses it (:wrong_app)")
+      session = client.tokens.verify(@sms[:fresh])
 
-      expect(client.tokens.verify(@sms[:fresh]).user_id).to eq(@sms[:user_id])
+      expect(session.user_id).to eq(@sms[:user_id])
+      expect(session.app_id).to eq(client.tokens.public_app_id)
     end
 
     it "signs out (sessions.sign_out); the token stops working" do

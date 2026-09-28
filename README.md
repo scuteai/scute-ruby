@@ -54,7 +54,7 @@ elsewhere.
 ```ruby
 scute.users.create("ada@example.com", meta: { plan: "pro" })
 scute.users.invite("bob@example.com")
-scute.users.find_by_identifier("ada@example.com")
+scute.users.find_by_identifier("ada@example.com") # or "+14155550123"; nil when nobody uses it
 scute.users.list(page: 1)
 scute.users.update(id, user_meta: { plan: "team" })
 scute.users.deactivate(id) / activate(id) / delete(id)
@@ -65,6 +65,11 @@ scute.sessions.current_user(access_token)
 scute.sessions.refresh(refresh_token)
 scute.sessions.sign_out(access_token)
 ```
+
+`find_by_identifier` matches the email in any case, or the phone number
+as digits (include the country code), and never creates a user.
+`sessions.list` and `sessions.revoke` need only the secret key, no user
+session. Meta keys have to be user meta fields the app declares.
 
 ### Signing in as a user (support access)
 
@@ -237,9 +242,9 @@ or not; the app's policy and settings are put back as they were. (Access
 requests and decision log rows stay: the API has no way to delete them.)
 Tokens, secrets and codes other than 424242 never reach the output.
 
-Examples marked pending are known SDK bugs, each with the reason. RSpec
-fails a pending example once it passes, so a fix shows up as a failure
-until the `pending` line goes.
+A known SDK bug can be marked with `pending("<what it does instead>")`:
+RSpec fails a pending example once it passes, so a fix shows up as a
+failure until the `pending` line goes.
 
 ### Credentials
 
