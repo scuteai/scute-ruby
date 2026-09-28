@@ -180,7 +180,9 @@ override. Override per tool with
 Reviewer approvals cover one exact call (its arguments go with the request),
 and approvals and verifications are spent only on a call no other guard
 stops. Checks within a run go one at a time, so budgets hold under parallel
-tool calls. A task revoked in Scute ends the run for good.
+tool calls. A task revoked in Scute ends the run for good, and so does an
+agent Scute paused for going over its budget (the run never starts a new
+task for it).
 
 People in the loop, all with the task token:
 
@@ -202,6 +204,46 @@ Your own guard:
 Scute::Guards.define("no-weekend-refunds") do |call|
   call.guide("Refunds wait until Monday.") if call.tool == "refund_invoice" && [0, 6].include?(Time.now.utc.wday)
 end
+```
+
+### Plans and previews
+
+When the agent knows every call it means to make, it can ask for one review
+of all of them:
+
+```ruby
+plan = run.request_plan([{ tool: "refund_invoice", args: { invoice_id: 1, amount: 40 } },
+                         { tool: "refund_invoice", args: { invoice_id: 2, amount: 15 } }], reason: "Ticket 88")
+plan["say"]      # tell the person it's waiting for a reviewer
+run.plan_status  # where it stands, and which steps ran
+```
+
+Once a reviewer approves it, each step that needed approval runs once, with
+exactly those arguments, through the usual checks. When nothing needs
+approval, the answer's status is `not_needed`.
+
+`run.preview(tool, args)` asks what a call would need right now (a dry run,
+an `Authz::Decision`): it doesn't count toward budgets and doesn't use up a
+verification or an approval.
+
+### Tool drift and decoys
+
+Report the tools the model sees, and Scute notices if one changes later (a
+changed description is a known prompt injection route):
+
+```ruby
+run.report_tools(tools.map { |t| { name: t.name, description: t.description, input_schema: t.params_schema } })
+```
+
+Only a hash of each definition leaves your process (the same hash the
+TypeScript harness sends). The first report is the baseline.
+
+Decoy tools are tools no legitimate task calls. Offer them to the model like
+any other, and list them in `Scute::Guards.decoy`. A call is refused, Scute
+pauses the agent and alerts your team, and the run is over:
+
+```ruby
+Scute::Harness.new(agent: "support-bot", guards: [Scute::Guards.decoy(%w[export_all_customers]), Scute::Guards.permissions])
 ```
 
 ## Live suite
@@ -241,7 +283,8 @@ and each spec says so):
   outside the task, beyond the agent's roles), human steps with a test
   identity, reviewer approvals, `run.property` and `run.sign` (verified
   with the property's JWKS), suspend and resume, a budget of 2 that pauses
-  the agent on its 3rd action.
+  the agent on its 3rd action (and closes the run). Plans, previews, tool
+  drift and decoys are written and skipped until the API has them.
 - Auth MCP: JSON-RPC over HTTP with an agent key (`scute_identify`,
   `scute_submit_code`, `scute_check`), then the backend's conversation
   lookup and check.

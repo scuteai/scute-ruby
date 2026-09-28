@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Harness: a run closes for good when Scute pauses its agent for going over its budget (`budget_exceeded`), and never starts a new task for it. `run.request_plan(calls, reason:)` files several calls for one review and `run.plan_status` shows it; after approval each step runs once with exactly its arguments. `run.preview(tool, args)` is a dry run that uses nothing up. `run.report_tools(definitions)` reports a hash of each tool definition so Scute notices drift, and `Scute::Guards.decoy(tools)` refuses a decoy tool, reports it and closes the run. Same behavior as @scute/harness.
 - `users.previous_accounts(id)` lists a user's earlier, deleted accounts (someone deleted who signs in again gets a fresh account), and `users.merge(id, from:)` merges one into the live account: roles, passkeys, MFA methods and data move over, history stays on the old account.
 - `users.find_by_identifier` searches the app's users with the secret key and keeps only an exact match: the email in any case, or the phone number as digits. It returns nil when nobody by that identifier uses the app, never creates a user, makes no call for a blank identifier, and looks at up to 10 pages of 100.
 - `sessions.list` and `sessions.revoke` are documented as working with the secret key alone.

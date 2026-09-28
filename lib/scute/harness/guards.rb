@@ -437,6 +437,34 @@ module Scute
       end
     end
 
+    # Decoy tools: tools no legitimate task calls (say export_all_customers).
+    # Offer them to the model like any other tool and list them here. A call
+    # means the agent was steered, usually by a prompt injection: it's
+    # refused, Scute pauses the agent and alerts your team, and the run is
+    # over. report: false only refuses.
+    class Decoy < Guard
+      MESSAGE = "I can't continue with this. A person will follow up."
+
+      def initialize(tools, report: true, mode: nil)
+        super("decoy", mode: mode)
+        @tools = Array(tools).map(&:to_s)
+        @report = report
+      end
+
+      def before(call)
+        return nil unless @tools.include?(call.tool)
+
+        if @report
+          begin
+            call.run.report_decoy(call.tool)
+          rescue Scute::Error
+            nil # refused either way; the run is closed
+          end
+        end
+        call.deny(MESSAGE, "decoy_called")
+      end
+    end
+
     # Your own guard, as a block of the call.
     class Custom < Guard
       def initialize(name, mode: nil, after: nil, &before)
@@ -459,6 +487,7 @@ module Scute
     def args(rules, **) = Args.new(rules, **)
     def budget(**) = Budget.new(**)
     def content(**) = Content.new(**)
+    def decoy(tools, **) = Decoy.new(tools, **)
     def define(name, mode: nil, after: nil, &before) = Custom.new(name, mode: mode, after: after, &before)
   end
 end

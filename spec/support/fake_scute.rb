@@ -10,7 +10,7 @@ class FakeScute
   Seen = Data.define(:verb, :path, :body, :auth, :headers, :query)
 
   attr_reader :seen
-  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status, :signing_keys, :revoked, :people
+  attr_accessor :request_status, :ttl, :ceiling, :decide, :down, :verification_status, :signing_keys, :revoked, :people, :plan_needed
 
   def initialize(decide: nil, ceiling: %w[invoice:read invoice:refund], request_status: "pending", ttl: 1800)
     @decide = decide
@@ -32,6 +32,7 @@ class FakeScute
       { id: "user6", email: "zoe@example.com", phone: nil }
     ]
     @merged = []
+    @plan_needed = true
   end
 
   def paths(path) = seen.select { |s| s.path == path }
@@ -166,6 +167,25 @@ class FakeScute
       return json({ error: "Task token missing" }, 401) unless task
 
       json({ id: "req1", status: request_status, say: "I've asked for approval. I'll let you know when there's an answer." }, 201)
+    in [:post, "/v1/auth/app1/agent/plans"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      steps = Array(body["steps"]).map do |step|
+        { permission: "#{step.dig('resource', 'type')}:#{step['action']}", needs: plan_needed ? "approval" : "none", details: step["details"] }
+      end
+      return json({ status: "not_needed", steps: steps }) unless plan_needed
+
+      json({ id: "plan1", status: "pending", say: "I've asked for approval.", steps: steps }, 201)
+    in [:get, "/v1/auth/app1/agent/plans/plan1"]
+      json({ id: "plan1", status: request_status, steps: [{ permission: "invoice:refund", needs: "approval", used: false }] })
+    in [:post, "/v1/auth/app1/agent/tools"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json({ known: Array(body["tools"]).size, new: [], changed: [] })
+    in [:post, "/v1/auth/app1/agent/decoys"]
+      return json({ error: "Task token missing" }, 401) unless task
+
+      json({ paused: true, say: "I can't continue with this. A person will follow up." })
     in [:get, "/v1/auth/app1/agent/approvals/req1"]
       json({ id: "req1", status: request_status, say: request_status == "approved" ? "It's approved." : "Still waiting." })
     in [:post, "/v1/auth/app1/challenges"]
