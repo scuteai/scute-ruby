@@ -283,8 +283,9 @@ and each spec says so):
   outside the task, beyond the agent's roles), human steps with a test
   identity, reviewer approvals, `run.property` and `run.sign` (verified
   with the property's JWKS), suspend and resume, a budget of 2 that pauses
-  the agent on its 3rd action (and closes the run). Plans, previews, tool
-  drift and decoys are written and skipped until the API has them.
+  the agent on its 3rd action (and closes the run), a plan approved once
+  whose steps each run once, a dry-run preview that uses nothing up, tool
+  drift, and a decoy that pauses the agent.
 - Auth MCP: JSON-RPC over HTTP with an agent key (`scute_identify`,
   `scute_submit_code`, `scute_check`), then the backend's conversation
   lookup and check.
