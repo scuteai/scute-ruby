@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+- The end user's IP address: `Scute::Client.new(client_ip:)` and `client.with_client_ip(ip)` send it as `X-Scute-Client-IP` on calls made with the secret key, so Scute checks the sign-ins your server starts or completes against the workspace's IP rules (without it they are not checked). `Scute::ClientIP.with(ip) { }` sets it for any client in the block. `Scute::ClientIP::Middleware` (Rack) and the controller concerns (`scute_client_ip`) fill it from the request with `request.remote_ip` in Rails or `Rack::Request#ip`, never reading `X-Forwarded-For` themselves. Only one IPv4 or IPv6 address is sent: a value you pass that isn't one raises `ArgumentError`, one read from a request is skipped.
 - Harness: a run closes for good when Scute pauses its agent for going over its budget (`budget_exceeded`), and never starts a new task for it. `run.request_plan(calls, reason:)` files several calls for one review and `run.plan_status` shows it; after approval each step runs once with exactly its arguments. `run.preview(tool, args)` is a dry run that uses nothing up. `run.report_tools(definitions)` reports a hash of each tool definition so Scute notices drift, and `Scute::Guards.decoy(tools)` refuses a decoy tool, reports it and closes the run. Same behavior as @scute/harness.
 - `users.previous_accounts(id)` lists a user's earlier, deleted accounts (someone deleted who signs in again gets a fresh account), and `users.merge(id, from:)` merges one into the live account: roles, passkeys, MFA methods and data move over, history stays on the old account.
 - `users.find_by_identifier` searches the app's users with the secret key and keeps only an exact match: the email in any case, or the phone number as digits. It returns nil when nobody by that identifier uses the app, never creates a user, makes no call for a blank identifier, and looks at up to 10 pages of 100.

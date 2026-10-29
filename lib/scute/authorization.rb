@@ -38,8 +38,16 @@ module Scute
                                context: scute_authz_context(context)).allowed?
     end
 
+    # A client for this request that passes the person's IP address
+    # (scute_client_ip) on calls made with the secret key.
     def scute_client
-      @scute_client ||= Client.new
+      @scute_client ||= Client.new(client_ip: scute_client_ip)
+    end
+
+    # The person's IP address: request.remote_ip in Rails (honors
+    # config.action_dispatch.trusted_proxies), Rack::Request#ip otherwise.
+    def scute_client_ip
+      ClientIP.from_request(respond_to?(:request) ? request : nil)
     end
 
     # With Scute::Authentication, the signed-in user; otherwise define it.
