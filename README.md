@@ -97,6 +97,55 @@ Hand `tokens` to the browser (`scute.beginImpersonation(tokens)` in
 @scute/js-core); `stopImpersonating()` there brings the support person's own
 session back.
 
+## Passing the end user's IP address
+
+When your server starts or completes a sign-in with the secret key (a
+challenge such as a step-up, creating or signing in a user), Scute sees your
+server's address, not the person's. Pass the person's address and Scute
+checks it against the workspace's IP rules; without it, those sign-ins are
+not checked against IP rules (Scute logs `auth.login.ip_rules_skipped`). On
+other secret-key calls it is recorded as the person's address for sessions
+and audit events. It is sent as the `X-Scute-Client-IP` header, only on calls
+made with the secret key.
+
+```ruby
+scute = Scute::Client.new(client_ip: request.remote_ip) # every secret-key call from this client
+scute.with_client_ip(request.remote_ip).users.create("ada@example.com") # a copy, for one call or a few
+
+Scute::ClientIP.with(request.remote_ip) do # any client without its own address, in this block
+  scute.authz.start_step_up(user_id: id, decision: decision, method: "email_otp")
+end
+```
+
+Scute takes one IPv4 or IPv6 address, never a range or a list. A value you
+pass that isn't one address raises `ArgumentError`; `nil` or blank sends
+nothing.
+
+Filled in for you:
+
+- `Scute::Authentication` and `Scute::Authorization`: `scute_client` passes
+  the request's address (`scute_client_ip`; override it to read the address
+  elsewhere).
+- `Scute::ClientIP::Middleware` (Rack): every client used while handling a
+  request passes its address, including one you made once at boot, unless the
+  client was given its own.
+
+```ruby
+# config/application.rb
+config.middleware.use Scute::ClientIP::Middleware
+# config.ru
+use Scute::ClientIP::Middleware
+```
+
+An address read from a request that isn't one IP is skipped, never sent.
+
+Behind a proxy or load balancer: the SDK never reads `X-Forwarded-For` itself.
+In Rails it uses `request.remote_ip`, so list your proxies in
+`config.action_dispatch.trusted_proxies`; in plain Rack it uses
+`Rack::Request#ip`, which skips Rack's trusted (private) proxies. If your
+proxy passes the address some other way, read it yourself and pass it with
+`client_ip:`, `with_client_ip` or `Scute::ClientIP.with`.
+
 ## Authorization
 
 ```ruby

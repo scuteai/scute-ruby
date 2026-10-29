@@ -3,6 +3,7 @@
 require_relative "scute/version"
 require_relative "scute/errors"
 require_relative "scute/http"
+require_relative "scute/client_ip"
 require_relative "scute/client"
 require_relative "scute/authz"
 require_relative "scute/agents"

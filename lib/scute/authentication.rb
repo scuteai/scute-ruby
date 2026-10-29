@@ -14,7 +14,8 @@ module Scute
   # The token is read from Authorization: Bearer, X-Authorization, or the
   # cookie the Scute browser SDK sets. Override scute_access_token to read it
   # elsewhere. With Scute::Authorization included too, checks use the signed-in
-  # user and pass the impersonation context for you.
+  # user and pass the impersonation context for you. Calls made through
+  # scute_client pass the person's IP address (scute_client_ip).
   module Authentication
     # Raised by scute_authenticate! when there is no valid session. `reason`
     # is the InvalidToken reason (:missing, :expired, :signature, ...).
@@ -63,8 +64,17 @@ module Scute
       scute_session&.user_id
     end
 
+    # A client for this request that passes the person's IP address
+    # (scute_client_ip) on calls made with the secret key.
     def scute_client
-      @scute_client ||= Client.new
+      @scute_client ||= Client.new(client_ip: scute_client_ip)
+    end
+
+    # The person's IP address: request.remote_ip in Rails (honors
+    # config.action_dispatch.trusted_proxies), Rack::Request#ip otherwise.
+    # Override it to read the address elsewhere.
+    def scute_client_ip
+      ClientIP.from_request(request)
     end
 
     private
