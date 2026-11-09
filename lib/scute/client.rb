@@ -32,6 +32,11 @@ module Scute
       dup.tap { |copy| copy.instance_variable_set(:@client_ip, ClientIP.parse!(client_ip)) }
     end
 
+    # Never shows the secret key.
+    def inspect
+      "#<#{self.class.name} app_id=#{app_id.inspect} secret=#{secret? ? '***' : 'nil'}>"
+    end
+
     def secret?
       !@secret.to_s.empty?
     end

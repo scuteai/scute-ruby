@@ -32,6 +32,9 @@ module Scute
       @ordered = @guards.reject { |g| runs_last?(g) } + @guards.select { |g| runs_last?(g) }
     end
 
+    # Never shows the client's secret or a run's tokens.
+    def inspect = "#<#{self.class.name} agent=#{agent.inspect} guards=#{guards.map(&:name).inspect}>"
+
     # Start (or resume, with the same id:) a job for the agent.
     def run(**) = Run.new(self, **)
 

@@ -105,7 +105,7 @@ RSpec.describe Scute::Harness do
       expect { run.complete_verification }.to raise_error(Scute::APIError, /Not verified yet \(pending\)/)
       fake.verification_status = "completed"
       run.complete_verification
-      expect(run.snapshot["challenges"]).to eq("invoice:pay" => "ch_ok")
+      expect(run.snapshot["challenges"]).to eq("invoice:pay" => "***") # remembered, never shown
     end
 
     it "rejects a verification Scute doesn't accept" do
@@ -205,6 +205,86 @@ RSpec.describe Scute::Harness do
 
       expect(fake.seen.last(2).map(&:path)).to eq(["/v1/auth/app1/agent/sessions/sess1/end", "#{mint_path}/task1/revoke"])
       expect { run.token }.to raise_error(Scute::APIError, /closed/)
+    end
+
+    it "end the session with your backend's task token on revoke! and complete!" do
+      %i[revoke! complete!].each do |verb|
+        fake = FakeScute.new
+        h = Scute::Harness.new(agent: "support-bot", app_id: "app1", secret: nil, base_url: "https://scute.test", transport: fake)
+        run = h.run(token: "sct_from_backend")
+        run.session
+        run.public_send(verb)
+
+        ended = fake.paths("/v1/auth/app1/agent/sessions/sess1/end")
+        expect(ended.map(&:auth)).to eq(["Bearer sct_from_backend"]), "#{verb} should end the session"
+        expect(run.snapshot["closed"]).to be(true)
+      end
+    end
+
+    it "start a new task when the remembered one has already expired" do
+      fake = FakeScute.new
+      h = harness(fake)
+      run = h.run(id: "chat-1", acts_for: "user1")
+      run.check("read_invoice", { id: 1 })
+      run.send(:state)["expires_at"] = (Time.now - 60).utc.iso8601
+      run.send(:save)
+
+      resumed = h.run(id: "chat-1", acts_for: "user1")
+      expect(resumed.check("read_invoice", { id: 1 }).kind).to eq(:proceed)
+      expect(fake.paths(mint_path).size).to eq(2)
+      expect(fake.paths(check_path).last.auth).to eq("Bearer sct_token2")
+      expect(resumed.snapshot).not_to have_key("closed")
+    end
+
+    it "a 401 for a task that has run out doesn't close the run; the next call starts a new task" do
+      fake = FakeScute.new
+      run = nil
+      expire_now = false
+      transport = lambda do |method, url, headers, body|
+        if expire_now && url.end_with?("/agent/check") && headers["Authorization"] == "Bearer sct_token1"
+          expire_now = false
+          run.send(:state)["expires_at"] = (Time.now - 1).utc.iso8601 # ran out while the call was in flight
+          next [401, JSON.generate(error: "Task token is invalid", error_code: "invalid_task_token")]
+        end
+        fake.call(method, url, headers, body)
+      end
+      run = harness(transport).run(acts_for: "user1")
+      run.check("read_invoice", { id: 1 })
+
+      expire_now = true
+      expect(run.check("read_invoice", { id: 1 }).kind).to eq(:deny)
+      expect(run.snapshot).not_to have_key("closed")
+
+      expect(run.check("read_invoice", { id: 1 }).kind).to eq(:proceed)
+      expect(fake.paths(mint_path).size).to eq(2)
+      expect(fake.paths(check_path).last.auth).to eq("Bearer sct_token2")
+    end
+
+    it "never show a token or the secret" do
+      fake = FakeScute.new
+      h = harness(fake)
+      run = h.run(acts_for: "user1")
+      run.check("read_invoice", { id: 1 })
+      run.start_verification(method: "email_otp", permission: "invoice:read")
+      run.submit_code("123456")
+      run.start_verification(method: "email_otp", permission: "invoice:pay")
+      shown = [h.inspect, run.inspect, JSON.generate(run.snapshot), h.client.inspect, h.spec("read_invoice").inspect].join(" ")
+      expect(run.send(:state)["token"]).to eq("sct_token1") # remembered
+      expect(shown).not_to include("sct_")
+      expect(shown).not_to include("sk_test")
+      expect(shown).not_to include("ch_ok")
+
+      dead = lambda do |method, url, headers, body|
+        next [401, JSON.generate(error: "Task token is invalid", error_code: "invalid_task_token")] if url.include?("/agent/")
+
+        fake.call(method, url, headers, body)
+      end
+      gone = harness(dead).run(acts_for: "user1")
+      expect { gone.whoami }.to raise_error(Scute::APIError) { |e| expect("#{e.message} #{e.inspect} #{e.body}").not_to include("sct_") }
+
+      closed = harness(FakeScute.new(decide: ->(*) { { decision: "deny", reason: "task_closed" } })).run(acts_for: "user1")
+      verdict = closed.check("read_invoice", { id: 1 })
+      expect("#{verdict.inspect} #{verdict.message}").not_to include("sct_")
     end
 
     it "list the tools inside the task's ceiling" do

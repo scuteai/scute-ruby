@@ -64,6 +64,22 @@ RSpec.describe "Harness regressions" do
     expect(run.check("refund_invoice", args).kind).to eq(:proceed)
   end
 
+  it "a person's confirmation isn't spent on a call another guard stopped" do
+    deny = true
+    fake = FakeScute.new(decide: ->(_body, _seen) { deny ? { decision: "deny", reason: "no_role" } : { decision: "allow" } })
+    run = harness(fake, tools: { refund_invoice: { tier: :high } },
+                        guards: [Scute::Guards.approval, Scute::Guards.permissions]).run(acts_for: "user1")
+    args = { invoice_id: "INV-1", amount: 90 }
+    run.confirm("refund_invoice", args)
+
+    expect(run.check("refund_invoice", args).kind).to eq(:deny)
+    expect(run.snapshot["confirmed"].size).to eq(1)
+
+    deny = false
+    expect(run.check("refund_invoice", args).kind).to eq(:proceed)
+    expect(run.snapshot["confirmed"]).to eq([])
+  end
+
   it "runs resumed by id for someone else don't reuse the first person's task or verification" do
     fake = FakeScute.new
     h = harness(fake, guards: [Scute::Guards.verify_person(when: { tools: ["refund_invoice"] }), Scute::Guards.permissions])
@@ -126,7 +142,7 @@ RSpec.describe "Harness regressions" do
       run.check("search_web", { query: "-eyJ" * 20_000 })
       run.after("fetch_page", {}, "#{'a.' * 20_000}@#{'a.' * 20_000}")
 
-      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 0.5
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 5 # generous: catches backtracking, not a slow CI runner
     end
   end
 

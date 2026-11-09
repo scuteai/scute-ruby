@@ -109,7 +109,11 @@ module Scute
       def before(call)
         return nil unless applies?(call, @when)
         return nil if call.approved_by_user?
-        return nil if call.mode == :enforce && call.run.consume_confirmation(call)
+
+        if call.mode == :enforce && (confirmation = call.run.confirmation_for(call))
+          call.confirmation = confirmation # spent by Run#check only if nothing else stops the call
+          return nil
+        end
 
         text = "Confirm: #{Harness::Messages.describe_call(call.tool, call.args)}"
         call.approve(@message ? @message.call(text) : text)
@@ -252,10 +256,9 @@ module Scute
       private
 
       def violation(field, value, rule)
-        if value.is_a?(Numeric)
-          return "#{field} can be at most #{rule[:max]}." if rule[:max] && value > rule[:max]
-          return "#{field} has to be at least #{rule[:min]}." if rule[:min] && value < rule[:min]
-        end
+        problem = range_violation(field, value, rule)
+        return problem if problem
+
         if value.is_a?(String)
           return "#{field} can be at most #{rule[:max_length]} characters." if rule[:max_length] && value.length > rule[:max_length]
           return "#{field} isn't in the expected format." if rule[:pattern] && !value.match?(rule[:pattern])
@@ -263,6 +266,18 @@ module Scute
         return "#{field} has to be one of: #{rule[:one_of].join(', ')}." if rule[:one_of] && !rule[:one_of].include?(value)
 
         nil
+      end
+
+      # min/max. Models often pass numbers as strings ("900"): the limits apply to those too.
+      def range_violation(field, value, rule)
+        return nil unless rule[:max] || rule[:min]
+
+        number = value.is_a?(String) ? Float(value.strip, exception: false) : value
+        return "#{field} has to be a number." if value.is_a?(String) && !number&.finite?
+        return nil unless number.is_a?(Numeric)
+        return "#{field} can be at most #{rule[:max]}." if rule[:max] && number > rule[:max]
+
+        "#{field} has to be at least #{rule[:min]}." if rule[:min] && number < rule[:min]
       end
     end
 

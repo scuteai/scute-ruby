@@ -19,6 +19,16 @@ RSpec.describe Scute::Guards do
       expect(run.check("refund_invoice", { note: "too long" }).kind).to eq(:guide)
       expect(run.check("send_email", { to: "a@evil.test" }).message).to eq("Only example.com addresses.")
     end
+
+    it "applies min and max to numbers passed as strings" do
+      run = with(described_class.args({ refund_invoice: { amount: { min: 1, max: 500 } } })).run
+
+      expect(run.check("refund_invoice", { amount: "900" }).message).to eq("amount can be at most 500.")
+      expect(run.check("refund_invoice", { amount: "0.5" }).message).to eq("amount has to be at least 1.")
+      expect(run.check("refund_invoice", { amount: "90" }).kind).to eq(:proceed)
+      expect(run.check("refund_invoice", { amount: "lots" }).message).to eq("amount has to be a number.")
+      expect(run.check("refund_invoice", { amount: "Infinity" }).message).to eq("amount has to be a number.")
+    end
   end
 
   describe ".budget" do
@@ -160,6 +170,14 @@ RSpec.describe Scute::Guards do
       expect(run.check("refund_invoice", { invoice_id: 42, amount: 91 }).kind).to eq(:approve)
       expect(run.check("refund_invoice", { invoice_id: 42, amount: 90 }).kind).to eq(:proceed)
       expect(run.check("refund_invoice", { invoice_id: 42, amount: 90 }).kind).to eq(:approve)
+    end
+
+    it "keeps a confirmation when another guard stops the call" do
+      run = with(described_class.approval, described_class.budget(calls: 0), tools: { refund_invoice: { tier: :high } }).run
+      run.confirm("refund_invoice", { invoice_id: 42 })
+
+      expect(run.check("refund_invoice", { invoice_id: 42 }).kind).to eq(:deny)
+      expect(run.snapshot["confirmed"].size).to eq(1)
     end
   end
 end
