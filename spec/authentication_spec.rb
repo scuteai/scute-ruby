@@ -54,7 +54,7 @@ RSpec.describe "Authentication" do
     it "only takes RS256 (no alg none, no HMAC with the public key)" do
       claims = b64(JSON.generate(uuid: "user1", aid: "app1", exp: now.to_i + 600))
       none = "#{b64(JSON.generate(alg: 'none'))}.#{claims}."
-      expect(reason_for(none)).to eq(:malformed).or eq(:algorithm)
+      expect(reason_for(none)).to eq(:algorithm)
 
       header = b64(JSON.generate(alg: "HS256"))
       hmac = OpenSSL::HMAC.digest("SHA256", AuthSpecKeys::KEY.public_key.to_pem, "#{header}.#{claims}")
@@ -247,6 +247,26 @@ RSpec.describe "Authentication" do
       c.scute_authorize!("read", "invoice:1", context: { "channel" => "web" })
 
       expect(fake.seen.last.body["context"]).to eq("channel" => "web")
+    end
+
+    [[Scute::Authentication, Scute::Authorization], [Scute::Authorization, Scute::Authentication]].each do |order|
+      it "refuses a check without a session, before any call (include #{order.map { |m| m.name.split('::').last }.join(', then ')})" do
+        klass = Class.new do
+          order.each { |m| include m }
+          attr_reader :request
+
+          def initialize(request, client)
+            @request = request
+            @scute_client = client
+          end
+        end
+        c = klass.new(request, client).tap { |k| k.scute_client.instance_variable_set(:@tokens, tokens) }
+
+        expect(c.scute_user_id).to be_nil
+        expect { c.scute_authorize!("read", "invoice:1") }.to raise_error(Scute::Unauthenticated) { |e| expect(e.reason).to eq(:missing) }
+        expect(c.scute_can?("read", "invoice:1")).to be(false)
+        expect(fake.seen).to be_empty
+      end
     end
   end
 end

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `scute_authorize!` raises `Scute::Unauthenticated` and `scute_can?` returns false when nobody is signed in, before any call to Scute (a check never runs without a user id). With `Scute::Authorization` and `Scute::Authentication` included in either order, `scute_user_id` is nil when signed out.
+- Harness: `run.snapshot` no longer shows the task token, and masks challenge tokens and a pending verification's token as `"***"`. `inspect` on `Scute::Client`, `Scute::Harness` and runs never shows the secret key or a token.
+- Harness: `guards.args` applies `min`/`max` to numbers passed as strings (`"900"`), and guides "has to be a number" when the string isn't one.
+- Harness: a person's confirmation (`run.confirm`) is spent only when the call runs, not when another guard stops it.
+- Harness: `revoke!` and `complete!` on a run with a task token from your backend (`run(token:)`) end the run's session with that token.
+- `Scute::ClientIP.parse` refuses IPv6 zone ids (`fe80::1%eth0`). Documented that Rack trusts private-network peers as proxies.
+- `scute.tokens.verify` reports an `alg: none` token as `:algorithm` (it was `:malformed` because the empty signature was dropped).
+
 ## 0.3.0
 
 - The end user's IP address: `Scute::Client.new(client_ip:)` and `client.with_client_ip(ip)` send it as `X-Scute-Client-IP` on calls made with the secret key, so Scute checks the sign-ins your server starts or completes against the workspace's IP rules (without it they are not checked). `Scute::ClientIP.with(ip) { }` sets it for any client in the block. `Scute::ClientIP::Middleware` (Rack) and the controller concerns (`scute_client_ip`) fill it from the request with `request.remote_ip` in Rails or `Rack::Request#ip`, never reading `X-Forwarded-For` themselves. Only one IPv4 or IPv6 address is sent: a value you pass that isn't one raises `ArgumentError`, one read from a request is skipped.

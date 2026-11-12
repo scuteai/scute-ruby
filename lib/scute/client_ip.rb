@@ -22,10 +22,10 @@ module Scute
     module_function
 
     # The address, trimmed, or nil when the value isn't one IP address (blank,
-    # a range, a list or anything else).
+    # a range, a list, an IPv6 zone id like fe80::1%eth0, or anything else).
     def parse(value)
       text = value.to_s.strip
-      return nil if text.empty? || text.include?("/")
+      return nil if text.empty? || text.include?("/") || text.include?("%")
 
       IPAddr.new(text)
       text
@@ -58,6 +58,14 @@ module Scute
     # request.remote_ip, which honors config.action_dispatch.trusted_proxies.
     # Rack: Rack::Request#ip, which skips Rack's trusted proxies. Never reads
     # X-Forwarded-For itself.
+    #
+    # Caveat: Rack (and Rails by default) trusts every private-network peer
+    # (10/8, 172.16/12, 192.168/16, loopback, fc00::/7) as a proxy, so a
+    # request that reaches the app straight from a private address can set
+    # its own X-Forwarded-For and have that address sent to Scute. If clients
+    # can reach the app from a private network without going through your
+    # proxy, set config.action_dispatch.trusted_proxies (or Rack's
+    # Rack::Request.ip_filter) to just your proxies.
     def from_request(request)
       return nil if request.nil?
 

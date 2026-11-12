@@ -25,16 +25,25 @@ module Scute
       end
     end
 
+    # Raises Scute::Unauthenticated, before any call to Scute, when nobody is
+    # signed in (scute_user_id is nil): a check never runs without a user.
     def scute_authorize!(action, resource = nil, context: nil, challenge: nil, approval: nil)
-      decision = scute_client.authz.check(user_id: scute_user_id, action: action, resource: resource,
+      user_id = scute_user_id
+      raise Unauthenticated.new("Sign in first", :missing) if user_id.nil?
+
+      decision = scute_client.authz.check(user_id: user_id, action: action, resource: resource,
                                           context: scute_authz_context(context), challenge: challenge, approval: approval)
       raise Forbidden, decision unless decision.allowed?
 
       decision
     end
 
+    # False, without a call to Scute, when nobody is signed in.
     def scute_can?(action, resource = nil, context: nil)
-      scute_client.authz.check(user_id: scute_user_id, action: action, resource: resource,
+      user_id = scute_user_id
+      return false if user_id.nil?
+
+      scute_client.authz.check(user_id: user_id, action: action, resource: resource,
                                context: scute_authz_context(context)).allowed?
     end
 
@@ -50,10 +59,10 @@ module Scute
       ClientIP.from_request(respond_to?(:request) ? request : nil)
     end
 
-    # With Scute::Authentication, the signed-in user; otherwise define it.
+    # With Scute::Authentication, the signed-in user (nil when signed out,
+    # same as Authentication#scute_user_id); otherwise define it.
     def scute_user_id
-      session = respond_to?(:scute_session) ? scute_session : nil
-      return session.user_id if session
+      return scute_session&.user_id if respond_to?(:scute_session)
 
       raise NotImplementedError, "Define scute_user_id (the Scute app user id of the signed-in person), " \
                                  "or include Scute::Authentication"

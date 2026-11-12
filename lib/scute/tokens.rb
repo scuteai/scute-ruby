@@ -63,7 +63,7 @@ module Scute
     private
 
     def decode(token)
-      parts = token.split(".")
+      parts = token.split(".", -1) # keep an empty signature ("alg: none" tokens end in ".")
       raise InvalidToken.new("Not a JWT", :malformed) unless parts.size == 3
 
       header = JSON.parse(b64(parts[0]))

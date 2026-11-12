@@ -146,6 +146,11 @@ In Rails it uses `request.remote_ip`, so list your proxies in
 proxy passes the address some other way, read it yourself and pass it with
 `client_ip:`, `with_client_ip` or `Scute::ClientIP.with`.
 
+Rack (and Rails by default) treats every private-network peer as a trusted
+proxy, so a client that reaches the app directly from a private address can
+choose the address sent to Scute with its own `X-Forwarded-For`. If that's
+possible in your network, limit the trusted proxies to yours.
+
 ## Authorization
 
 ```ruby

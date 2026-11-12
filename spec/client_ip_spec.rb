@@ -22,7 +22,7 @@ RSpec.describe Scute::ClientIP do
 
     it "refuses ranges, lists and anything else" do
       ["", "  ", nil, "203.0.113.0/24", "2001:db8::/32", "203.0.113.24, 10.0.0.1", "203.0.113", "unknown",
-       "203.0.113.24\r\nX-Evil: 1", "999.1.1.1"].each do |value|
+       "203.0.113.24\r\nX-Evil: 1", "999.1.1.1", "fe80::1%eth0", "fe80::1%25eth0"].each do |value|
         expect(described_class.parse(value)).to be_nil, "expected #{value.inspect} to be refused"
       end
     end
@@ -124,7 +124,7 @@ RSpec.describe Scute::ClientIP do
       expect(Scute::ClientIP.current).to be_nil
     end
 
-    it "uses the address Rails worked out, then Rack's, never X-Forwarded-For from anyone" do
+    it "uses the address Rails worked out, then Rack's ip (X-Forwarded-For only past a private-network peer)" do
       expect(seen_in(env("10.0.0.2", "action_dispatch.remote_ip" => "198.51.100.9"))).to eq("198.51.100.9")
       # Rack skips its trusted (private) proxies only.
       expect(seen_in(env("10.0.0.2", "HTTP_X_FORWARDED_FOR" => "203.0.113.24"))).to eq("203.0.113.24")

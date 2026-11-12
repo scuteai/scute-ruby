@@ -8,6 +8,8 @@ module Scute
       # args: symbol keys, after any earlier guard's transform. mode: of the guard looking at it now.
       # clear: no enforced guard so far stops the call (the moment to spend single-use proofs).
       attr_accessor :args, :mode, :clear
+      # @api private: the person's confirmation this call relies on, spent only if the call runs.
+      attr_accessor :confirmation
 
       def initialize(run:, id:, tool:, args:, spec:, messages: [], approved_by_user: false)
         @run = run

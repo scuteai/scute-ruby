@@ -125,14 +125,10 @@ module Scute
         end
       end
 
-      # @api private
-      def consume_confirmation(call)
-        @lock.synchronize do
-          next false unless state["confirmed"].delete(fingerprint(call.tool, call.args))
-
-          save
-          true
-        end
+      # @api private: the person's confirmation of this exact call, if there is one (Run#check spends it when the call runs).
+      def confirmation_for(call)
+        confirmed = fingerprint(call.tool, call.args)
+        @lock.synchronize { state["confirmed"].include?(confirmed) ? confirmed : nil }
       end
 
       # ── Engine ──
@@ -248,8 +244,20 @@ module Scute
         (allowed + human_tool_names).uniq
       end
 
-      # A copy of what this run remembers.
-      def snapshot = JSON.parse(JSON.generate(state))
+      MASK = "***"
+
+      # A copy of what this run remembers (counters, task, session,
+      # verification), with the tokens masked.
+      def snapshot
+        s = @lock.synchronize { JSON.parse(JSON.generate(state)) }
+        s.delete("token")
+        s["challenges"] = s["challenges"].transform_values { MASK }
+        s["pending"]["token"] = MASK if s["pending"].is_a?(Hash) && s["pending"].key?("token")
+        s
+      end
+
+      # Never shows the task token or what the run remembers.
+      def inspect = "#<#{self.class.name} id=#{id.inspect} agent=#{harness.agent.inspect}>"
 
       # ── Adapters ──
 
@@ -276,8 +284,10 @@ module Scute
         "scute:run:#{harness.agent}:#{who}:#{id}"
       end
 
+      # The call runs: it takes its share of the budgets and spends the person's confirmation.
       def reserve(call)
         @lock.synchronize do
+          state["confirmed"].delete(call.confirmation) if call.confirmation
           state["calls"] += 1
           save
         end
@@ -329,7 +339,7 @@ module Scute
       def close!(verb)
         @lock.synchronize do
           s = state
-          if s["session_id"] && s["token"]
+          if s["session_id"] && (s["token"] || @given_token)
             begin
               agent_call(:post, "/agent/sessions/#{harness.client.esc(s['session_id'])}/end")
             rescue Error
