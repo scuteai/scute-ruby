@@ -78,4 +78,72 @@ RSpec.describe Scute::Client do
     no_secret = described_class.new(app_id: "app1", secret: nil, transport: fake)
     expect { no_secret.authz.check(user_id: "u", action: "read") }.to raise_error(Scute::ConfigurationError, /secret key/)
   end
+
+  it "reads each kind of decision" do
+    kinds = %w[read pay approve delete].to_h { |a| [a, client.authz.check(user_id: "user1", action: a, resource: "invoice:1")] }
+
+    expect(kinds.transform_values { |d| [d.allowed?, d.step_up?, d.needs_approval?, d.denied?] }).to eq(
+      "read" => [true, false, false, false], "pay" => [false, true, false, false],
+      "approve" => [false, false, true, false], "delete" => [false, false, false, true]
+    )
+    expect(kinds["pay"].step_up).to eq("method" => "any", "authorizes_action" => "invoice:pay")
+    expect(kinds["approve"].approval).to eq("by" => "reviewer")
+    expect(kinds["delete"].explanation).to eq("Ada can't delete invoices.")
+  end
+
+  describe "thin wrappers" do
+    let(:recorded) { [] }
+    let(:recording) do
+      seen = recorded
+      Class.new do
+        define_method(:call) do |method, url, headers, body|
+          seen << { verb: method, path: URI(url).path, query: URI(url).query, auth: headers["Authorization"],
+                    body: body && JSON.parse(body) }
+          [200, "{}"]
+        end
+      end.new
+    end
+    let(:wrapped) { described_class.new(app_id: "app1", secret: "sk_test", base_url: "https://scute.test", transport: recording) }
+
+    {
+      "users.get" => [->(c) { c.users.get("u 1") }, :get, "/v1/app1/users/u%201", nil],
+      "users.invite" => [->(c) { c.users.invite("bob@example.com", meta: { plan: "pro" }) }, :post, "/v1/app1/users/invite",
+                         { "identifier" => "bob@example.com", "user_meta" => { "plan" => "pro" } }],
+      "users.activate" => [->(c) { c.users.activate("user1") }, :post, "/v1/app1/users/user1/activate", nil],
+      "users.delete" => [->(c) { c.users.delete("user1") }, :delete, "/v1/app1/users/user1", nil],
+      "sessions.revoke" => [->(c) { c.sessions.revoke("user1", "ses/1") }, :delete, "/v1/app1/users/user1/sessions/ses%2F1", nil],
+      "authz.authorized_users" => [->(c) { c.authz.authorized_users(action: "read", limit: 5) }, :get,
+                                   "/v1/auth/app1/authz/authorized-users", nil],
+      "authz.filter" => [->(c) { c.authz.filter(user_id: "user1", action: "read", resource_type: "invoice") }, :post,
+                         "/v1/auth/app1/authz/filter", { "user_id" => "user1", "action" => "read", "resource_type" => "invoice" }],
+      "authz.snapshot" => [->(c) { c.authz.snapshot }, :get, "/v1/apps/app1/authz/snapshot", nil],
+      "authz.requests" => [->(c) { c.authz.requests(status: "pending") }, :get, "/v1/apps/app1/authz/requests", nil],
+      "authz.decide_request (deny)" => [->(c) { c.authz.decide_request("req1", :deny, note: "no") }, :post,
+                                        "/v1/apps/app1/authz/requests/req1/deny", { "note" => "no" }],
+      "agents.create" => [->(c) { c.agents.create(slug: "bot", owner_user_id: "user1", roles: ["support"]) }, :post,
+                          "/v1/apps/app1/authz/agents", { "slug" => "bot", "owner_user_id" => "user1", "roles" => ["support"] }],
+      "agents.get" => [->(c) { c.agents.get("bot") }, :get, "/v1/apps/app1/authz/agents/bot", nil],
+      "agents.update" => [->(c) { c.agents.update("bot", name: "Bot") }, :patch, "/v1/apps/app1/authz/agents/bot", { "name" => "Bot" }],
+      "agents.delete" => [->(c) { c.agents.delete("bot") }, :delete, "/v1/apps/app1/authz/agents/bot", nil],
+      "agents.suspend" => [->(c) { c.agents.suspend("bot") }, :post, "/v1/apps/app1/authz/agents/bot/suspend", nil],
+      "agents.resume" => [->(c) { c.agents.resume("bot") }, :post, "/v1/apps/app1/authz/agents/bot/resume", nil],
+      "agents.complete_task" => [->(c) { c.agents.complete_task("bot", "t1") }, :post, "/v1/apps/app1/authz/agents/bot/tasks/t1/complete", nil],
+      "agents.assertion" => [->(c) { c.agents.assertion("bot", "t1") }, :get, "/v1/apps/app1/authz/agents/bot/tasks/t1/assertion", nil]
+    }.each do |name, (call, verb, path, body)|
+      it "#{name} sends #{verb.upcase} #{path} with the secret key" do
+        call.call(wrapped)
+
+        expect(recorded.size).to eq(1)
+        expect(recorded.first).to include(verb: verb, path: path, auth: "Bearer sk_test", body: body)
+      end
+    end
+
+    it "puts the filters in the query" do
+      wrapped.authz.authorized_users(action: "read", resource: "invoice:1", limit: 5)
+      wrapped.authz.requests(status: "pending", user_id: "user1")
+      wrapped.authz.requests
+
+      expect(recorded.map { |r| r[:query] }).to eq(["action=read&resource=invoice%3A1&limit=5", "status=pending&user_id=user1", nil])
+    end
+  end
 end
