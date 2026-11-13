@@ -52,6 +52,17 @@ class FakeScute
 
   def json(data, status = 200) = [status, JSON.generate(data)]
 
+  # The engine's answer to a user check, by action.
+  def authz_decision(check)
+    case check["action"]
+    when "delete" then { decision: "deny", reason: "no_role_grants_permission", explanation: "Ada can't delete invoices." }
+    when "pay" then { decision: "allow_with_step_up", reason: "verification_required", explanation: "Verify first.",
+                      step_up: { method: "any", authorizes_action: "invoice:pay" } }
+    when "approve" then { decision: "allow_with_approval", reason: "approval_required", approval: { by: "reviewer" } }
+    else { decision: "allow", allowed: true, reason: "role_grant", permission: "invoice:read", roles: ["clerk"] }
+    end
+  end
+
   def jwk(key, kid)
     { kty: "RSA", kid: kid, use: "sig", alg: "RS256",
       n: Base64.urlsafe_encode64(key.n.to_s(2), padding: false), e: Base64.urlsafe_encode64(key.e.to_s(2), padding: false) }
@@ -195,10 +206,16 @@ class FakeScute
     in [:post, "/v1/apps/app1/authz/requests"]
       json({ id: "req1", status: request_status }, 201)
     in [:post, "/v1/auth/app1/authz/check"]
-      json({ decision: "allow", allowed: true, reason: "role_grant", permission: "invoice:read", roles: ["clerk"] })
+      return json({ error: "Unauthorized" }, 401) unless secret
+
+      json(authz_decision(body))
     in [:post, "/v1/auth/app1/authz/check-batch"]
-      json({ results: body["checks"].map { |c| { decision: c["action"] == "read" ? "allow" : "deny", reason: "x" } } })
+      return json({ error: "Unauthorized" }, 401) unless secret
+
+      json({ results: body["checks"].map { |c| authz_decision(c) } })
     in [:get, %r{\A/v1/auth/app1/authz/users/[^/]+/permissions\z}]
+      return json({ error: "Unauthorized" }, 401) unless secret
+
       json({ user_id: "user1", permissions: ["invoice:read"], query: query })
     in [:post, "/v1/apps/app1/authz/requests/req1/approve"]
       json({ id: "req1", status: "approved" })
